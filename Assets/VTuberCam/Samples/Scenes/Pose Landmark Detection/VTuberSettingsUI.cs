@@ -1,10 +1,8 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
-/// VTuberCam — Panel de ajustes rediseñado.
-/// PANTALLA DE INICIO: se muestra al lanzar el programa (con fade-in y animación de pulso).
-/// PANEL LATERAL: aparece a la DERECHA sin tapar al modelo. [Tab] para alternar.
-/// Estética: Dark Cyberpunk-Elegant — acentos Cyan/Púrpura.
+/// VTuberCam — Panel de ajustes minimalista y limpio.
+/// Ventana modal centrada con fondo translúcido y controles redondeados.
 /// </summary>
 public class VTuberSettingsUI : MonoBehaviour
 {
@@ -20,6 +18,14 @@ public class VTuberSettingsUI : MonoBehaviour
     public GameObject wideModel;
     public GameObject slimModel;
 
+    [Header("Escritorio de Minecraft (opcional)")]
+    [Tooltip("Se busca/crea solo si lo dejas vacío.")]
+    public MinecraftTable table;
+
+    [Header("Avatar Loader (opcional)")]
+    [Tooltip("Se busca/crea solo si lo dejas vacío.")]
+    public AvatarLoader avatarLoader;
+
     [Header("Teclas rápidas")]
     public KeyCode toggleMenuKey = KeyCode.Tab;
     public KeyCode cleanModeKey  = KeyCode.F1;
@@ -28,19 +34,23 @@ public class VTuberSettingsUI : MonoBehaviour
     // ─── Estado UI ────────────────────────────────────────────────────────────
     bool  _showPanel        = false;
     bool  _cleanMode        = false;
-    bool  _virtualCamActive = true;
+    bool  _virtualCamActive = false; // inicia apagado, se enciende tras elegir avatar
     bool  _showStartScreen  = true;
+    bool  _avatarSelected   = false;
+    string _customSkinPath  = "";  // Ruta a skin personalizada (.png)
     float _startTime;
     float _pulseT    = 0f;
-    float _scanlineY = 0f;
+
+    // ─── Categoría activa ────────────────────────────────────────────────────
+    // 0 = General, 1 = Expresiones, 2 = Extras
+    int _activeCategory = 0;
 
     // ─── Ajustes del avatar ──────────────────────────────────────────────────
     bool  _skinWide      = true;
     bool  _blink         = true;
-    int   _chromaIdx     = 0;
-    bool  _showCustomRGB = false;
-    float _cr = 0f, _cg = 1f, _cb = 0f;
-    Color _customColor   = Color.green;
+
+    // ─── Fondo gris oscuro por defecto (sin chroma key) ──────────────────────
+    static readonly Color DefaultBgColor = new Color(0.15f, 0.15f, 0.20f, 1f);
 
     // ─── Transformación del avatar ────────────────────────────────────────────
     Vector3    _avatarInitPos;
@@ -61,39 +71,29 @@ public class VTuberSettingsUI : MonoBehaviour
     [Header("Escala Inicial por Defecto")]
     public float defaultScale = 2.2f;
 
-    // ─── Colores Chroma ──────────────────────────────────────────────────────
-    static readonly Color[] _presets = {
-        Color.green, Color.blue, Color.magenta,
-        new Color(0.08f,0.08f,0.12f), Color.black, Color.white
-    };
-    static readonly string[] _presetNames = { "Verde","Azul","Magenta","Gris","Negro","Blanco" };
-
-    // ─── Paleta visual ────────────────────────────────────────────────────────
-    static readonly Color ColPanel     = new Color(0.07f, 0.07f, 0.13f, 0.98f);
-    static readonly Color ColCard      = new Color(0.10f, 0.10f, 0.18f, 1.00f);
-    static readonly Color ColCyan      = new Color(0.00f, 0.85f, 0.90f, 1.00f);
-    static readonly Color ColPurple    = new Color(0.55f, 0.20f, 0.90f, 1.00f);
-    static readonly Color ColPurpleDim = new Color(0.35f, 0.12f, 0.60f, 1.00f);
-    static readonly Color ColCyanDim   = new Color(0.00f, 0.50f, 0.55f, 1.00f);
-    static readonly Color ColText      = new Color(0.88f, 0.92f, 1.00f, 1.00f);
-    static readonly Color ColTextDim   = new Color(0.50f, 0.55f, 0.70f, 1.00f);
-    static readonly Color ColDanger    = new Color(0.90f, 0.20f, 0.35f, 1.00f);
-    static readonly Color ColBtnBg     = new Color(0.14f, 0.14f, 0.24f, 1.00f);
-    static readonly Color ColBtnHov    = new Color(0.22f, 0.22f, 0.38f, 1.00f);
-    static readonly Color ColSep       = new Color(0.55f, 0.20f, 0.90f, 0.30f);
+    // ─── Colores minimalistas ────────────────────────────────────────────────
+    static readonly Color ColBg      = new Color(0.12f, 0.14f, 0.18f, 0.92f);   // fondo translúcido
+    static readonly Color ColBgLight = new Color(0.18f, 0.20f, 0.25f, 0.95f);   // tarjetas
+    static readonly Color ColAccent  = new Color(0.40f, 0.60f, 0.95f, 1.00f);   // azul suave
+    static readonly Color ColAccentD = new Color(0.25f, 0.45f, 0.80f, 1.00f);   // azul oscuro
+    static readonly Color ColText    = new Color(0.92f, 0.94f, 0.98f, 1.00f);
+    static readonly Color ColTextDim = new Color(0.62f, 0.66f, 0.72f, 1.00f);
+    static readonly Color ColSep     = new Color(0.30f, 0.33f, 0.40f, 0.60f);
+    static readonly Color ColDanger  = new Color(0.95f, 0.30f, 0.30f, 1.00f);
 
     // ─── Texturas ─────────────────────────────────────────────────────────────
-    Texture2D _texWhite, _texPanel, _texCard, _texBtn, _texBtnHov,
-              _texBtnCyan, _texBtnCyanHov, _texBtnPurp, _texBtnPurpHov,
-              _texBtnDanger, _texBtnDangerHov, _texBtnSel;
+    Texture2D _texWhite, _texBg, _texCard, _texBtn, _texBtnHov,
+              _texBtnAcc, _texBtnAccHov, _texBtnDanger, _texBtnDangerHov,
+              _texBtnTab, _texBtnTabSel, _texCheckOff, _texCheckOn, _texCheckMark;
 
     // ─── Estilos ──────────────────────────────────────────────────────────────
     GUIStyle _stTitle, _stSection, _stBody, _stHint,
-             _stBtnNorm, _stBtnSel, _stBtnCyan, _stBtnPurple,
-             _stBtnDanger, _stBigBtn;
+             _stBtnNorm, _stBtnSel, _stBtnAcc, _stBtnAccHov,
+             _stBtnDanger, _stBtnTab, _stBtnTabSel, _stBigBtn, _stCard,
+             _stCheck;
     bool     _stylesReady;
-    Vector2  _scroll;
-    float    _panelW = 295f;
+    float    _panelW = 560f;
+    float    _panelH = 640f;
 
     // ─────────────────────────────────────────────────────────────────────────
     void Awake()
@@ -109,6 +109,9 @@ public class VTuberSettingsUI : MonoBehaviour
             else { var m = GameObject.Find("model"); if (m) avatarRoot = m.transform; }
         }
 
+        if (!avatarLoader)
+            avatarLoader = FindFirstObjectByType<AvatarLoader>();
+
         if (avatarRoot)
         {
             _avatarInitPos   = avatarRoot.position;
@@ -116,39 +119,52 @@ public class VTuberSettingsUI : MonoBehaviour
             _avatarInitScale = avatarRoot.localScale.x > 0 ? avatarRoot.localScale.x : 1f;
         }
 
-        _skinWide    = PlayerPrefs.GetInt("vtb_skinWide", 1) == 1;
-        _blink       = PlayerPrefs.GetInt("vtb_blink", 1) == 1;
-        _chromaIdx   = PlayerPrefs.GetInt("vtb_chromaIdx", 0);
-        _cr          = PlayerPrefs.GetFloat("vtb_cr", 0f);
-        _cg          = PlayerPrefs.GetFloat("vtb_cg", 1f);
-        _cb          = PlayerPrefs.GetFloat("vtb_cb", 0f);
-        _modelScale  = PlayerPrefs.GetFloat("vtb_scale", defaultScale);
-        _panOffset.x = PlayerPrefs.GetFloat("vtb_panX", 0f);
-        _panOffset.y = PlayerPrefs.GetFloat("vtb_panY", 0f);
-        _rotationY   = PlayerPrefs.GetFloat("vtb_rotY", 0f);
-        if (avatar != null && PlayerPrefs.HasKey("vtb_headSens"))
-            avatar.headSensitivity = PlayerPrefs.GetFloat("vtb_headSens", 1.35f);
+        _skinWide   = PlayerPrefs.GetInt("vtb_skinWide", 1) == 1;
+        _blink      = PlayerPrefs.GetInt("vtb_blink", 1) == 1;
+        _customSkinPath = PlayerPrefs.GetString("vtb_customSkinPath", "");
 
-        if (!virtualCam && mainCamera)
+        // Borrar preferencias de posición/tamaño para reiniciar cada vez que se abre
+        PlayerPrefs.DeleteKey("vtb_scale");
+        PlayerPrefs.DeleteKey("vtb_panX");
+        PlayerPrefs.DeleteKey("vtb_panY");
+        PlayerPrefs.DeleteKey("vtb_rotY");
+        PlayerPrefs.Save();
+
+        _modelScale = defaultScale * 1.05f;
+        _panOffset.x = 0f;
+        _panOffset.y = 0f;
+        _rotationY  = 0f;
+
+        // Iniciar SIN cámara y SIN avatar visible hasta que el usuario elija uno
+        _avatarSelected = false;
+        if (virtualCam) virtualCam.enabled = false;
+        _virtualCamActive = false;
+
+        if (mainCamera)
         {
-            virtualCam = mainCamera.GetComponent<UnityCapture>();
-            if (!virtualCam) virtualCam = mainCamera.gameObject.AddComponent<UnityCapture>();
-        }
-        _virtualCamActive = PlayerPrefs.GetInt("vtb_vcam", 1) == 1;
-        if (virtualCam)
-        {
-            virtualCam.HideWarnings = false;
-            virtualCam.ResizeMode = UnityCapture.EResizeMode.LinearResize;
-            virtualCam.enabled = _virtualCamActive;
+            mainCamera.clearFlags = CameraClearFlags.SolidColor;
+            mainCamera.backgroundColor = DefaultBgColor;
         }
 
-        ApplySkin(); ApplyBlink(); ApplyChroma(); ApplyAvatarTransform();
+        EnsureTable();
+        if (table != null) table.SetVisible(false);
+        // No aplicar skin/blink/transform hasta que haya avatar cargado
+    }
+
+    void EnsureTable()
+    {
+        if (table != null) return;
+        table = FindFirstObjectByType<MinecraftTable>();
+        if (table == null)
+        {
+            var go = new GameObject("MinecraftTable");
+            table = go.AddComponent<MinecraftTable>();
+        }
     }
 
     void Update()
     {
-        _pulseT   += Time.deltaTime;
-        _scanlineY = (_scanlineY + Time.deltaTime * 60f) % Screen.height;
+        _pulseT += Time.deltaTime;
 
         if (!_showStartScreen)
         {
@@ -162,25 +178,16 @@ public class VTuberSettingsUI : MonoBehaviour
     bool IsMouseOverUI()
     {
         Vector2 mp = Input.mousePosition;
-
-        // Si el panel lateral derecho está abierto y el cursor está sobre él
-        if (_showPanel && mp.x >= (Screen.width - _panelW))
-            return true;
-
-        // Botón "Ajustes" superior derecho cuando el panel está cerrado
         if (!_showPanel && mp.x >= (Screen.width - 150f) && mp.y >= (Screen.height - 50f))
             return true;
-
         return false;
     }
 
     void HandleMouseControls()
     {
         if (!avatarRoot) return;
-
         bool overUI = IsMouseOverUI();
 
-        // Zoom solo si el puntero NO está sobre el menú lateral ni la interfaz
         float scroll = Input.GetAxis("Mouse ScrollWheel");
         if (!overUI && Mathf.Abs(scroll) > 0.001f)
         {
@@ -189,7 +196,6 @@ public class VTuberSettingsUI : MonoBehaviour
             SaveTransformPrefs();
         }
 
-        // Paneo (clic derecho)
         if (Input.GetMouseButtonDown(1) && !overUI)
         {
             _lastMouse = Input.mousePosition;
@@ -208,7 +214,6 @@ public class VTuberSettingsUI : MonoBehaviour
             _draggingPan = false;
         }
 
-        // Rotación (clic central o Shift + clic izquierdo)
         bool rotBtn  = Input.GetMouseButton(2) || (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButton(0));
         bool rotDown = Input.GetMouseButtonDown(2) || (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButtonDown(0));
 
@@ -244,9 +249,7 @@ public class VTuberSettingsUI : MonoBehaviour
     void SaveTransformPrefs()
     { PlayerPrefs.SetFloat("vtb_scale", _modelScale); PlayerPrefs.SetFloat("vtb_panX", _panOffset.x); PlayerPrefs.SetFloat("vtb_panY", _panOffset.y); PlayerPrefs.SetFloat("vtb_rotY", _rotationY); PlayerPrefs.Save(); }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // ONGUI
-    // ═════════════════════════════════════════════════════════════════════════
+    // ─── ONGUI ────────────────────────────────────────────────────────────────
     void OnGUI()
     {
         if (!_stylesReady) BuildStyles();
@@ -256,382 +259,120 @@ public class VTuberSettingsUI : MonoBehaviour
         if (!_showPanel)
         {
             float ty = Screen.height - 72f;
-            DrawRect(new Rect(10, ty - 6, 430, 68), new Color(0.04f,0.04f,0.08f,0.85f));
-            GUI.color = new Color(1f,1f,1f,0.60f);
+            DrawRect(new Rect(10, ty - 6, 430, 68), new Color(0.05f, 0.06f, 0.09f, 0.80f));
+            GUI.color = new Color(1f, 1f, 1f, 0.60f);
             GUI.Label(new Rect(16, ty,      420, 18), "Rueda: Zoom  |  Der+Drag: Mover  |  Cent+Drag: Rotar", _stHint);
             GUI.Label(new Rect(16, ty + 20, 350, 18), "[Tab] Ajustes   [F1] Modo Limpio   [R] Recalibrar",    _stHint);
             GUI.color = Color.white;
 
-            DrawRect(new Rect(Screen.width - 140, 10, 130, 36), ColPanel);
-            DrawRect(new Rect(Screen.width - 140, 10, 2, 36), ColCyan);
+            DrawRect(new Rect(Screen.width - 140, 10, 130, 36), ColBgLight);
+            DrawRect(new Rect(Screen.width - 140, 10, 2, 36), ColAccent);
             if (GUI.Button(new Rect(Screen.width - 138, 10, 128, 36), "  Ajustes", _stBtnNorm))
                 _showPanel = true;
             return;
         }
 
-        DrawSidePanel();
+        DrawModal();
     }
 
-    // ─── PANTALLA DE INICIO ──────────────────────────────────────────────────
-    void DrawStartScreen()
+    void DrawModal()
     {
-        float elapsed = Time.realtimeSinceStartup - _startTime;
-        float alpha   = Mathf.Clamp01(elapsed * 1.5f);
         float sw = Screen.width;
         float sh = Screen.height;
+        float mx = (sw - _panelW) * 0.5f;
+        float my = (sh - _panelH) * 0.5f;
 
-        // Fondo negro-azulado
-        DrawRect(new Rect(0, 0, sw, sh), new Color(0.03f, 0.03f, 0.07f, alpha));
+        // Fondo translúcido detrás del modal (oscurece la escena)
+        DrawRect(new Rect(0, 0, sw, sh), new Color(0f, 0f, 0f, 0.35f));
 
-        // Cuadrícula decorativa
-        GUI.color = new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha * 0.10f);
-        for (float x = 0; x < sw; x += 80) GUI.DrawTexture(new Rect(x, 0, 1, sh), _texWhite);
-        for (float y = 0; y < sh; y += 80) GUI.DrawTexture(new Rect(0, y, sw, 1), _texWhite);
-        GUI.color = Color.white;
+        // Fondo del modal translúcido
+        DrawRect(new Rect(mx, my, _panelW, _panelH), ColBg);
+        // Borde superior sutil
+        DrawRect(new Rect(mx, my, _panelW, 1), ColAccent);
 
-        // Línea de escaneo
-        if (alpha > 0.8f)
+        // Título
+        GUI.color = ColText;
+        GUI.Label(new Rect(mx + 20, my + 16, 400, 26), "Configuración", new GUIStyle(_stTitle) { fontSize = 18, fontStyle = FontStyle.Bold });
+
+        // Botón X cerrar
+        Rect closeBtn = new Rect(mx + _panelW - 34, my + 14, 26, 26);
+        if (GUI.Button(closeBtn, "✕", _stBtnDanger))
+            _showPanel = false;
+
+        // Contenido (scroll)
+        float contentY = my + 56;
+        float contentH = _panelH - 56 - 44;
+        Rect contentRect = new Rect(mx + 20, contentY, _panelW - 40, contentH);
+
+        GUILayout.BeginArea(contentRect);
+        GUILayout.Space(4);
+
+        // Pestañas
+        GUILayout.BeginHorizontal();
+        string[] cats = { "Configuración General", "Expresiones", "Extras" };
+        for (int i = 0; i < cats.Length; i++)
         {
-            DrawRect(new Rect(0, _scanlineY, sw, 2), new Color(ColCyan.r, ColCyan.g, ColCyan.b, 0.04f));
+            bool sel = (_activeCategory == i);
+            GUIStyle st = sel ? _stBtnTabSel : _stBtnTab;
+            if (GUILayout.Button(cats[i], st, GUILayout.Height(30)))
+                _activeCategory = i;
+            GUILayout.Space(6);
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(12);
+
+        switch (_activeCategory)
+        {
+            case 0: DrawCategoryGeneral(); break;
+            case 1: DrawCategoryExpresiones(); break;
+            case 2: DrawCategoryExtras(); break;
         }
 
-        // ── Card central ──────────────────────────────────────────────────
-        float cardW = Mathf.Min(sw * 0.90f, 700f);
-        float cardH = 500f;
-        float cx = (sw - cardW) * 0.5f;
-        float cy = (sh - cardH) * 0.5f;
+        GUILayout.EndArea();
 
-        // Sombra
-        DrawRect(new Rect(cx + 6, cy + 6, cardW, cardH), new Color(0f, 0f, 0f, 0.45f * alpha));
-        // Card background
-        DrawRect(new Rect(cx, cy, cardW, cardH), new Color(ColPanel.r, ColPanel.g, ColPanel.b, alpha));
-        // Borde superior cyan
-        DrawRect(new Rect(cx, cy, cardW, 3), new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha));
-        // Borde izquierdo púrpura
-        DrawRect(new Rect(cx, cy, 3, cardH), new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha));
+        // Botones inferiores
+        float btnY = my + _panelH - 38;
+        float btnW = (_panelW - 60) / 2f;
+        GUILayout.BeginArea(new Rect(mx + 20, btnY, _panelW - 40, 32));
+        GUILayout.BeginHorizontal();
 
-        // ── Logo VTC ──────────────────────────────────────────────────────
-        float lx = cx + 30f;
-        float ly = cy + 26f;
-
-        // Fondo logo
-        DrawRect(new Rect(lx, ly, 74, 74), new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha * 0.20f));
-        // Marco del logo
-        DrawRect(new Rect(lx,      ly,      74,  2),  new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha));
-        DrawRect(new Rect(lx,      ly,       2, 74),  new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha));
-        DrawRect(new Rect(lx + 72, ly,       2, 74),  new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha));
-        DrawRect(new Rect(lx,      ly + 72, 74,  2),  new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha));
-
-        GUI.color = new Color(1f, 1f, 1f, alpha);
-        GUI.Label(new Rect(lx, ly, 74, 74), "VTC",
-            new GUIStyle(_stTitle) { fontSize = 26, fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha) } });
-
-        // Nombre app
-        GUI.Label(new Rect(lx + 90, ly + 2,  350, 34), "VTuberCam",
-            new GUIStyle(_stTitle) { fontSize = 23, normal = { textColor = new Color(1f,1f,1f,alpha) } });
-        GUI.Label(new Rect(lx + 92, ly + 34, 300, 20), "v1.0  |  AI Vision Tracker",
-            new GUIStyle(_stHint) { fontSize = 11,
-                normal = { textColor = new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha * 0.8f) } });
-
-        // Badge BETA
-        DrawRect(new Rect(lx + 92, ly + 52, 38, 16), new Color(ColPurple.r, ColPurple.g, ColPurple.b, alpha * 0.9f));
-        GUI.Label(new Rect(lx + 92, ly + 52, 38, 16), "BETA",
-            new GUIStyle(_stHint) { fontSize = 9, fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } });
-
-        // Separador horizontal
-        float sepY = cy + 115f;
-        DrawRect(new Rect(cx + 20, sepY, cardW - 40, 1), new Color(ColSep.r, ColSep.g, ColSep.b, alpha));
-
-        // Separador vertical sutil entre columnas
-        DrawRect(new Rect(cx + cardW * 0.5f, sepY + 12f, 1, 260f), new Color(ColSep.r, ColSep.g, ColSep.b, alpha * 0.4f));
-
-        // ── Columnas ──────────────────────────────────────────────────────
-        float colL = cx + 26f;
-        float colW = (cardW * 0.5f) - 40f;
-        float colR = cx + cardW * 0.5f + 20f;
-        float rowY = sepY + 14f;
-
-        GUIStyle stSec = new GUIStyle(_stSection)
-        { normal = { textColor = new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha) } };
-
-        // ── Columna izquierda: Config rápida ──────────────────────────────
-        GUI.Label(new Rect(colL, rowY, colW, 20), "CONFIGURACION RAPIDA", stSec);
-        rowY += 24f;
-
-        DrawStartLabel(colL, rowY, "Tipo de Skin:", alpha);
-        float skinBtnW = (colW - 105f) * 0.5f;
-        if (DrawStartBtn(colL + 100, rowY, skinBtnW, 26, "Wide (Steve)", _skinWide,  alpha)) { _skinWide = true;  ApplySkin(); }
-        if (DrawStartBtn(colL + 105 + skinBtnW, rowY, skinBtnW, 26, "Slim (Alex)", !_skinWide,  alpha)) { _skinWide = false; ApplySkin(); }
-        rowY += 34f;
-
-        DrawStartLabel(colL, rowY, "Parpadeo Auto:", alpha);
-        if (DrawStartBtn(colL + 100, rowY, 90, 26, _blink ? "ON" : "OFF", _blink, alpha))
-        { _blink = !_blink; ApplyBlink(); }
-        rowY += 34f;
-
-        bool vcamOn = _virtualCamActive && virtualCam != null && virtualCam.enabled;
-        DrawStartLabel(colL, rowY, "Cam. Virtual:", alpha);
-        if (DrawStartBtn(colL + 100, rowY, 90, 26, vcamOn ? "ON" : "OFF", vcamOn, alpha))
+        if (GUILayout.Button("Restaurar valores originales", _stBtnDanger, GUILayout.Height(28)))
         {
-            _virtualCamActive = !_virtualCamActive;
-            if (virtualCam) virtualCam.enabled = _virtualCamActive;
-            PlayerPrefs.SetInt("vtb_vcam", _virtualCamActive ? 1 : 0); PlayerPrefs.Save();
-        }
-        rowY += 38f;
-
-        GUI.Label(new Rect(colL, rowY, colW, 20), "FONDO CHROMA KEY", stSec);
-        rowY += 24f;
-
-        // Distribución 2x3 para que nunca invadan la columna derecha
-        float chromW = (colW - 10f) / 3f;
-        for (int i = 0; i < _presets.Length; i++)
-        {
-            int col = i % 3;
-            int row = i / 3;
-            float px = colL + col * (chromW + 5f);
-            float py = rowY + row * 30f;
-            bool sel = (_chromaIdx == i && !_showCustomRGB);
-            if (DrawStartBtn(px, py, chromW, 26, _presetNames[i], sel, alpha))
-            { _chromaIdx = i; _showCustomRGB = false; ApplyChroma(); }
+            _modelScale = defaultScale; _panOffset = Vector2.zero; _rotationY = 0f;
+            ApplyAvatarTransform(); SaveTransformPrefs();
+            if (table != null) table.ResetPlacement();
         }
 
-        // ── Columna derecha: Controles ─────────────────────────────────────
-        float c2y = sepY + 14f;
-        GUI.Label(new Rect(colR, c2y, colW, 20), "CONTROLES DE RATON", stSec);
-        c2y += 24f;
-        DrawShortcutRow(colR, c2y, "Rueda Raton",      "Zoom avatar",           alpha); c2y += 20f;
-        DrawShortcutRow(colR, c2y, "Der + Arrastrar",  "Mover avatar",          alpha); c2y += 20f;
-        DrawShortcutRow(colR, c2y, "Cent + Arrastrar", "Rotar avatar",          alpha); c2y += 20f;
-        DrawShortcutRow(colR, c2y, "[Tab]",            "Abrir / Cerrar panel",  alpha); c2y += 20f;
-        DrawShortcutRow(colR, c2y, "[F1]",             "Modo Limpio (OBS)",     alpha); c2y += 20f;
-        DrawShortcutRow(colR, c2y, "[R]",              "Recalibrar",            alpha); c2y += 26f;
+        GUILayout.FlexibleSpace();
 
-        // Nota OBS (confinada ordenadamente a su columna)
-        float noteW = colW;
-        float noteH = 54f;
-        DrawRect(new Rect(colR, c2y, noteW, noteH), new Color(ColCard.r, ColCard.g, ColCard.b, alpha * 0.90f));
-        DrawRect(new Rect(colR, c2y, 2, noteH), new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha * 0.80f));
-        GUI.Label(new Rect(colR + 8, c2y + 4, noteW - 14, noteH - 8),
-            "En OBS: agrega 'Camara Web' y elige 'Unity Video Capture' para usar la camara virtual sin capturar ventanas.",
-            new GUIStyle(_stHint) { wordWrap = true, fontSize = 10,
-                normal = { textColor = new Color(ColTextDim.r, ColTextDim.g, ColTextDim.b, alpha) } });
-
-        // ── Botón de inicio ────────────────────────────────────────────────
-        float btnW  = 230f;
-        float btnBX = cx + (cardW - btnW) * 0.5f;
-        float btnBY = cy + cardH - 66f;
-        float pulse = Mathf.Sin(_pulseT * 2.5f) * 0.08f + 0.92f;
-
-        // Glow detrás
-        DrawRect(new Rect(btnBX - 4, btnBY - 4, btnW + 8, 48),
-            new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha * 0.15f * pulse));
-
-        GUI.color = new Color(1f, 1f, 1f, alpha);
-        GUIStyle stStart = new GUIStyle(_stBigBtn)
+        if (GUILayout.Button("Aplicar cambios", _stBtnAcc, GUILayout.Height(28)))
         {
-            fontSize = 14, fontStyle = FontStyle.Bold,
-            normal = new GUIStyleState { background = _texBtnCyan,    textColor = new Color(0.03f,0.03f,0.08f) },
-            hover  = new GUIStyleState { background = _texBtnCyanHov, textColor = Color.black }
-        };
+            // Los cambios se aplican en tiempo real
+        }
 
-        if (GUI.Button(new Rect(btnBX, btnBY, btnW, 40), "  INICIAR VTUBERCAM", stStart))
-            _showStartScreen = false;
-        GUI.color = Color.white;
-
-        // Créditos pie
-        GUI.Label(new Rect(cx, cy + cardH - 20f, cardW, 18),
-            "VTuberCam  |  Open Source  |  Unity + AI Pose Landmarker",
-            new GUIStyle(_stHint)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(ColTextDim.r, ColTextDim.g, ColTextDim.b, alpha * 0.55f) }
-            });
+        GUILayout.EndHorizontal();
+        GUILayout.EndArea();
     }
 
-    // ─── PANEL LATERAL DERECHO ───────────────────────────────────────────────
-    void DrawSidePanel()
+    // ══ CATEGORÍA GENERAL ══
+    void DrawCategoryGeneral()
     {
-        float ph = Screen.height;
-        float px = Screen.width - _panelW;
+        DrawCardBegin();
 
-        // Fondo del panel
-        DrawRect(new Rect(px, 0, _panelW, ph), ColPanel);
-
-        // Borde izquierdo gradiente cyan->purple
-        for (int i = 0; i < (int)ph; i += 2)
-        {
-            float t = (float)i / ph;
-            Color lc = Color.Lerp(ColCyan, ColPurple, t);
-            GUI.color = new Color(lc.r, lc.g, lc.b, 0.85f);
-            GUI.DrawTexture(new Rect(px, i, 3, 2), _texWhite);
-        }
-        GUI.color = Color.white;
-
-        // Línea de escaneo sutil
-        if (_scanlineY > 0 && _scanlineY < ph)
-            DrawRect(new Rect(px, _scanlineY, _panelW, 1),
-                new Color(ColCyan.r, ColCyan.g, ColCyan.b, 0.035f));
-
-        GUILayout.BeginArea(new Rect(px, 0, _panelW, ph));
-
-        // ── Header ────────────────────────────────────────────────────────
-        GUILayout.Space(10);
-        GUILayout.BeginHorizontal();
-        GUILayout.Space(14);
-
-        Rect logoR = GUILayoutUtility.GetRect(30, 30, GUILayout.Width(30), GUILayout.Height(30));
-        DrawRect(logoR, new Color(ColPurple.r, ColPurple.g, ColPurple.b, 0.28f));
-        GUI.color = ColCyan;
-        GUI.Label(logoR, "V", new GUIStyle(_stTitle) { alignment = TextAnchor.MiddleCenter, fontSize = 16 });
-        GUI.color = Color.white;
-
-        GUILayout.Space(8);
-        GUILayout.BeginVertical();
-        GUILayout.Label("VTuberCam", _stTitle);
-        GUILayout.Label("Panel de Ajustes", new GUIStyle(_stHint) { fontSize = 10 });
-        GUILayout.EndVertical();
-        GUILayout.FlexibleSpace();
-        if (GUILayout.Button("x", _stBtnDanger, GUILayout.Width(28), GUILayout.Height(28)))
-            _showPanel = false;
-        GUILayout.Space(10);
-        GUILayout.EndHorizontal();
-
-        SeparatorGlow();
-
-        _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Width(_panelW), GUILayout.ExpandHeight(true));
-        GUILayout.Space(4);
-
-        // ══ 1. VISTA DEL AVATAR ══════════════════════════════════════════════
-        DrawSection("VISTA DEL AVATAR");
-
-        SliderFull("Zoom",        $"{_modelScale:0.0}x",             ref _modelScale,  SCALE_MIN, SCALE_MAX, v => { ApplyAvatarTransform(); SaveTransformPrefs(); });
-        SliderFull("Pos X",       $"{_panOffset.x:+0.00;-0.00;0}",  ref _panOffset.x, -2f,  2f,            v => { ApplyAvatarTransform(); SaveTransformPrefs(); });
-        SliderFull("Pos Y",       $"{_panOffset.y:+0.00;-0.00;0}",  ref _panOffset.y, -2f,  2f,            v => { ApplyAvatarTransform(); SaveTransformPrefs(); });
-        SliderFull("Rotar",       $"{_rotationY:0} grados",          ref _rotationY, -ROT_Y_MAX, ROT_Y_MAX, v => { ApplyAvatarTransform(); SaveTransformPrefs(); }, 2f);
-
-        if (avatar != null)
-        {
-            float hs = avatar.headSensitivity;
-            SliderFull("Sens. Cabeza", $"{hs:0.0}x", ref hs, 0.8f, 2.5f,
-                v => { avatar.headSensitivity = v; PlayerPrefs.SetFloat("vtb_headSens", v); PlayerPrefs.Save(); }, 0.05f);
-            avatar.headSensitivity = hs;
-        }
-
-        GUILayout.Space(4);
-        BtnCyan("Centrar y Resetear Vista", ResetAvatarTransform);
-        DrawHint("Rueda=Zoom  |  Der=Mover  |  Central=Rotar");
-
-        // ══ 2. FONDO CHROMA ══════════════════════════════════════════════════
-        DrawSection("FONDO CHROMA KEY");
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Space(10);
-        for (int i = 0; i < _presets.Length; i++)
-        {
-            bool sel = (_chromaIdx == i && !_showCustomRGB);
-            if (GUILayout.Button(_presetNames[i], sel ? _stBtnSel : _stBtnNorm,
-                GUILayout.Width(43), GUILayout.Height(24)))
-            { _chromaIdx = i; _showCustomRGB = false; ApplyChroma(); }
-            GUILayout.Space(1);
-        }
-        GUILayout.EndHorizontal();
-        GUILayout.Space(4);
-
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        _showCustomRGB = GUILayout.Toggle(_showCustomRGB, "  Color RGB personalizado", _stBody);
-        GUILayout.EndHorizontal();
-
-        if (_showCustomRGB)
-        {
-            SliderRGB("R", ref _cr, new Color(0.9f,0.3f,0.3f));
-            SliderRGB("G", ref _cg, new Color(0.3f,0.9f,0.5f));
-            SliderRGB("B", ref _cb, new Color(0.4f,0.6f,1.0f));
-            BtnCyan("Aplicar color RGB", () =>
-            {
-                _chromaIdx = -1; _customColor = new Color(_cr, _cg, _cb);
-                if (mainCamera) { mainCamera.clearFlags = CameraClearFlags.SolidColor; mainCamera.backgroundColor = _customColor; }
-                PlayerPrefs.SetFloat("vtb_cr", _cr); PlayerPrefs.SetFloat("vtb_cg", _cg);
-                PlayerPrefs.SetFloat("vtb_cb", _cb); PlayerPrefs.Save();
-            });
-        }
-        DrawHint("En OBS: Filtro -> Clave de Color con el mismo color.");
-
-        // ══ 3. OJOS Y SKIN ═══════════════════════════════════════════════════
-        DrawSection("OJOS Y SKIN");
-
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        bool nb = GUILayout.Toggle(_blink, "  Parpadeo automatico", _stBody);
-        GUILayout.EndHorizontal();
-        if (nb != _blink) { _blink = nb; ApplyBlink(); }
-
-        GUILayout.Space(4);
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        if (GUILayout.Button("Wide (Steve)", _skinWide  ? _stBtnSel : _stBtnNorm,
-            GUILayout.Width(128), GUILayout.Height(28))) { _skinWide = true;  ApplySkin(); }
-        GUILayout.Space(4);
-        if (GUILayout.Button("Slim (Alex)",  !_skinWide ? _stBtnSel : _stBtnNorm,
-            GUILayout.Width(128), GUILayout.Height(28))) { _skinWide = false; ApplySkin(); }
-        GUILayout.EndHorizontal();
-
-        // ══ 4. CAMARA DE SEGUIMIENTO (TRACKING) ══════════════════════════════
-        DrawSection("WEBCAM DE SEGUIMIENTO");
-
-        var imgSource = Mediapipe.Unity.Sample.ImageSourceProvider.ImageSource as Mediapipe.Unity.WebCamSource;
-        string curCam = imgSource?.sourceName;
-        if (string.IsNullOrEmpty(curCam)) curCam = "Detectando webcam...";
-
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        GUILayout.Label($"Activa: {curCam}", _stBody);
-        GUILayout.EndHorizontal();
-
-        var webcams = WebCamTexture.devices;
-        if (webcams != null && webcams.Length > 0)
-        {
-            for (int ci = 0; ci < webcams.Length; ci++)
-            {
-                var dev = webcams[ci];
-                if (dev.name.Contains("Unity Video Capture")) continue; // La virtual es para OBS, no de entrada
-                bool isCur = (dev.name == curCam);
-                GUILayout.BeginHorizontal(); GUILayout.Space(10);
-                string label = isCur ? $"●  {dev.name}" : $"○  {dev.name}";
-                if (GUILayout.Button(label, isCur ? _stBtnSel : _stBtnNorm,
-                    GUILayout.Width(_panelW - 24), GUILayout.Height(25)))
-                {
-                    if (imgSource != null && !isCur)
-                    {
-                        imgSource.SelectSource(ci);
-                    }
-                }
-                GUILayout.EndHorizontal();
-                GUILayout.Space(2);
-            }
-        }
-        DrawHint("Selecciona tu camara fisica real (no virtual).");
-
-        // ══ 5. CAMARA VIRTUAL ════════════════════════════════════════════════
-        DrawSection("CAMARA VIRTUAL DIRECTSHOW");
-
+        // Cámara Virtual
+        DrawSection("Cámara Virtual");
         bool vcam = _virtualCamActive && virtualCam != null && virtualCam.enabled;
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        if (GUILayout.Button(vcam ? "ACTIVADA — Unity Video Capture" : "DESACTIVADA",
-            vcam ? _stBtnSel : _stBtnNorm,
-            GUILayout.Width(_panelW - 24), GUILayout.Height(30)))
+        bool newVcam = Checkbox(vcam, "Habilitar cámara virtual");
+        if (newVcam != vcam)
         {
-            _virtualCamActive = !_virtualCamActive;
-            if (virtualCam) virtualCam.enabled = _virtualCamActive;
-            PlayerPrefs.SetInt("vtb_vcam", _virtualCamActive ? 1 : 0); PlayerPrefs.Save();
+            _virtualCamActive = newVcam;
+            if (virtualCam) virtualCam.enabled = newVcam;
+            PlayerPrefs.SetInt("vtb_vcam", newVcam ? 1 : 0); PlayerPrefs.Save();
         }
-        GUILayout.EndHorizontal();
-
+        DrawHint("OBS/Discord/Zoom: añade 'Cámara Web' → dispositivo 'Unity Video Capture'.");
         GUILayout.Space(4);
-        DrawStep("1", "OBS/Discord/Zoom: añade 'Camara Web'");
-        DrawStep("2", "Dispositivo: 'Unity Video Capture'");
-        DrawStep("3", "Listo! Sin HUD en tu stream.");
-        GUILayout.Space(4);
-        BtnCyan("Abrir Instalador del Driver", () =>
+        BtnAcc("Abrir Instalador del Driver", () =>
         {
             try
             {
@@ -642,90 +383,425 @@ public class VTuberSettingsUI : MonoBehaviour
             }
             catch (System.Exception ex) { Debug.LogError("Error: " + ex.Message); }
         });
-        DrawHint("Si no aparece la webcam: corre Install.bat como Administrador.");
 
-        // ══ 5. CALIBRACION ═══════════════════════════════════════════════════
-        DrawSection("CALIBRACION");
-        BtnPurple("Recalibrar Avatar  [R]", () => { if (avatar) avatar.RecalibrateNow(); });
-        DrawHint("Usalo si el avatar quedo inclinado o en posicion rara.");
+        DrawCardEnd();
 
-        // ══ 6. MODO STREAM ═══════════════════════════════════════════════════
-        DrawSection("MODO STREAM");
+        GUILayout.Space(12);
+
+        // Fondo
+        DrawCardBegin();
+        DrawSection("Fondo");
         GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        if (GUILayout.Button("[F1]  Ocultar interfaz para OBS",
-            _stBtnDanger, GUILayout.Width(_panelW - 24), GUILayout.Height(30)))
-            _cleanMode = true;
+        GUILayout.Label("Color por defecto: Gris Oscuro", _stBody);
         GUILayout.EndHorizontal();
-        DrawHint("Pulsa F1 para volver a mostrar los controles.");
+        DrawHint("El fondo de la cámara virtual es gris oscuro. En OBS usa filtro 'Clave de Color' si necesitas chroma.");
+        DrawCardEnd();
 
-        // ══ 7. ACERCA DE ─────────────────────────────────────────────────────
-        DrawSection("ACERCA DE");
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        GUILayout.BeginVertical();
-        GUILayout.Label("VTuberCam",
-            new GUIStyle(_stBody) { fontStyle = FontStyle.Bold, normal = { textColor = ColCyan } });
-        GUILayout.Label("Motor: Unity + AI Pose Landmarker", _stHint);
-        GUILayout.Label("Camara virtual: UnityCapture (DirectShow)", _stHint);
-        GUILayout.Space(4);
-        GUILayout.EndVertical();
-        GUILayout.EndHorizontal();
+        GUILayout.Space(12);
 
-        GUILayout.Space(20);
-        GUILayout.EndScrollView();
+        // Debug
+        DrawCardBegin();
+        DrawSection("Datos de Debug (HUD arriba)");
+        bool showDebug = avatar != null && avatar.showDebug;
+        bool newDebug = Checkbox(showDebug, "Mostrar datos de debug");
+        if (newDebug != showDebug)
+        {
+            if (avatar) avatar.showDebug = newDebug;
+        }
+        DrawHint("Oculta el texto de debug que aparece arriba a la izquierda.");
+        DrawCardEnd();
 
-        // Footer fijo
-        SeparatorGlow();
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        GUILayout.Label("VTuberCam  v1.0 BETA",
-            new GUIStyle(_stHint)
-            { normal = { textColor = new Color(ColTextDim.r, ColTextDim.g, ColTextDim.b, 0.5f) } });
-        GUILayout.FlexibleSpace();
-        GUILayout.Label($"{(int)(1f / Time.smoothDeltaTime)} fps",
-            new GUIStyle(_stHint)
-            { alignment = TextAnchor.MiddleRight,
-              normal = { textColor = new Color(ColCyan.r, ColCyan.g, ColCyan.b, 0.6f) } });
-        GUILayout.Space(10);
-        GUILayout.EndHorizontal();
-        GUILayout.Space(8);
-        GUILayout.EndArea();
+        GUILayout.Space(12);
+
+        // Reset vista
+        DrawCardBegin();
+        BtnAcc("Centrar y Resetear Vista", ResetAvatarTransform);
+        DrawHint("Rueda=Zoom  |  Der=Mover  |  Central=Rotar");
+        DrawCardEnd();
     }
 
-    // ─── Helpers de inicio ───────────────────────────────────────────────────
+    // ══ CATEGORÍA EXPRESIONES ══
+    void DrawCategoryExpresiones()
+    {
+        DrawCardBegin();
+        DrawSection("Expresiones");
+
+        bool newBlink = Checkbox(_blink, "Parpadeo automático");
+        if (newBlink != _blink) { _blink = newBlink; ApplyBlink(); }
+
+        GUILayout.Space(10);
+
+        if (avatar != null)
+        {
+            float hs = avatar.headSensitivity;
+            SliderFull("Sensibilidad cabeza", $"{hs:0.0}x", ref hs, 0.8f, 2.5f,
+                v => { avatar.headSensitivity = v; PlayerPrefs.SetFloat("vtb_headSens", v); PlayerPrefs.Save(); }, 0.05f);
+            avatar.headSensitivity = hs;
+        }
+
+        DrawHint("Controla el pestañeo y la sensibilidad de giro de cabeza.");
+        DrawCardEnd();
+    }
+
+    // ══ CATEGORÍA EXTRAS ══
+    void DrawCategoryExtras()
+    {
+        DrawCardBegin();
+        DrawSection("Extras");
+
+        EnsureTable();
+        if (table != null)
+        {
+            bool newVisible = Checkbox(table.visible, "Mostrar mesa");
+            if (newVisible != table.visible) table.SetVisible(newVisible);
+
+            GUILayout.Space(6);
+
+            // Toggle vinculado / desvinculado
+            bool newParented = Checkbox(table.IsParented, "Vinculado al avatar");
+            if (newParented != table.IsParented)
+            {
+                if (newParented) table.Reparentar();
+                else table.Desparentar();
+            }
+
+            GUILayout.Space(6);
+
+            if (table.IsParented)
+            {
+                // Vinculado: sliders locales (offset respecto al avatar)
+                float tableWidth = table.WidthBlocks;
+                SliderFull("Ancho mesa", $"{tableWidth:0.00} bl", ref tableWidth, 1f, 4f,
+                    v => table.SetScale(v / 2f), 0.01f);
+
+                float tableTopPx = table.TopPixels;
+                SliderFull("Altura mesa", $"{tableTopPx:+0.0;-0.0;0} px", ref tableTopPx, -16f, 14f,
+                    v => table.SetTopPixels(v), 0.05f);
+
+                Vector3 localPos = table.LocalPosition;
+                float lx = localPos.x;
+                float ly = localPos.y;
+                float lz = localPos.z;
+
+                SliderFull("Pos X (local)", $"{lx:+0.00;-0.00;0}", ref lx, -2f, 2f,
+                    v => { Vector3 p = table.LocalPosition; p.x = v; table.SetLocalPosition(p); }, 0.005f);
+                SliderFull("Pos Y (local)", $"{ly:+0.00;-0.00;0}", ref ly, -2f, 2f,
+                    v => { Vector3 p = table.LocalPosition; p.y = v; table.SetLocalPosition(p); }, 0.005f);
+                SliderFull("Pos Z (local)", $"{lz:+0.00;-0.00;0}", ref lz, -2f, 2f,
+                    v => { Vector3 p = table.LocalPosition; p.z = v; table.SetLocalPosition(p); }, 0.005f);
+            }
+            else
+            {
+                // Desvinculado: sliders mundo X / Y / Z
+                Vector3 wpos = table.GetWorldPosition();
+                float wx = wpos.x;
+                float wy = wpos.y;
+                float wz = wpos.z;
+
+                SliderFull("Pos X (mundo)", $"{wx:+0.00;-0.00;0}", ref wx, -5f, 5f,
+                    v => { Vector3 p = table.GetWorldPosition(); p.x = v; table.SetWorldPosition(p); }, 0.005f);
+                SliderFull("Pos Y (mundo)", $"{wy:+0.00;-0.00;0}", ref wy, -5f, 5f,
+                    v => { Vector3 p = table.GetWorldPosition(); p.y = v; table.SetWorldPosition(p); }, 0.005f);
+                SliderFull("Pos Z (mundo)", $"{wz:+0.00;-0.00;0}", ref wz, -5f, 5f,
+                    v => { Vector3 p = table.GetWorldPosition(); p.z = v; table.SetWorldPosition(p); }, 0.005f);
+
+                DrawHint("La posición se guarda automáticamente al mover los sliders.");
+            }
+
+            GUILayout.Space(6);
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(table.IsParented ? "Desvincular mesa" : "Vincular mesa",
+                _stBtnAcc, GUILayout.Height(28)))
+            {
+                if (table.IsParented) table.Desparentar();
+                else table.Reparentar();
+            }
+            GUILayout.EndHorizontal();
+
+            BtnAcc("Resetear mesa", () => table.ResetPlacement());
+            DrawHint("Vinculado: la mesa se mueve con el avatar. Desvinculado: la mesa queda fija en escena.");
+        }
+        else
+        {
+            DrawHint("No se pudo cargar la mesa. Revisa StreamingAssets/Blockbench/table/table.json");
+        }
+
+        GUILayout.Space(8);
+
+        // ── Skin personalizada ──
+        DrawCardBegin();
+        DrawSection("Skin personalizada");
+
+        GUILayout.BeginHorizontal(); GUILayout.Space(10);
+        GUILayout.Label("Skin (.png):", _stBody, GUILayout.Width(70));
+        _customSkinPath = GUILayout.TextField(_customSkinPath, _stBody, GUILayout.Height(24));
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal(); GUILayout.Space(10);
+#if UNITY_EDITOR
+        if (GUILayout.Button("Buscar skin (.png)", _stBtnAcc, GUILayout.Height(26)))
+        {
+            var path = UnityEditor.EditorUtility.OpenFilePanel("Seleccionar skin", "", "png");
+            if (!string.IsNullOrEmpty(path))
+            {
+                _customSkinPath = path;
+                if (avatarLoader != null)
+                {
+                    avatarLoader.SetCustomSkin(_customSkinPath);
+                    PlayerPrefs.SetString("vtb_customSkinPath", _customSkinPath);
+                    PlayerPrefs.Save();
+                }
+            }
+        }
+#else
+        if (GUILayout.Button("Buscar skin (.png) (solo en Editor)", _stBtnAcc, GUILayout.Height(26)))
+        {
+            // En builds no se puede abrir el explorador de archivos
+            Debug.LogWarning("Seleccionar archivo solo disponible en el Editor de Unity");
+        }
+#endif
+        GUILayout.EndHorizontal();
+
+        if (!string.IsNullOrEmpty(_customSkinPath))
+        {
+            GUILayout.BeginHorizontal(); GUILayout.Space(10);
+            GUILayout.Label($"Archivo: {_customSkinPath}", _stHint);
+            GUILayout.EndHorizontal();
+
+            if (GUILayout.Button("Quitar skin personalizada", _stBtnDanger, GUILayout.Height(24)))
+            {
+                _customSkinPath = "";
+                PlayerPrefs.SetString("vtb_customSkinPath", "");
+                PlayerPrefs.Save();
+                if (avatarLoader != null)
+                {
+                    avatarLoader.SetCustomSkin("");
+                }
+            }
+        }
+
+        DrawHint("Selecciona un archivo .png para usarlo como skin del avatar. Se guarda para la próxima vez.");
+        DrawCardEnd();
+    }
+
+    // ─── PANTALLA DE INICIO ───────────────────────────────────────────────────
+    void DrawStartScreen()
+    {
+        float elapsed = Time.realtimeSinceStartup - _startTime;
+        float alpha   = Mathf.Clamp01(elapsed * 1.5f);
+        float sw = Screen.width;
+        float sh = Screen.height;
+
+        DrawRect(new Rect(0, 0, sw, sh), new Color(0.08f, 0.10f, 0.14f, alpha));
+
+        GUI.color = new Color(ColAccent.r, ColAccent.g, ColAccent.b, alpha * 0.10f);
+        for (float x = 0; x < sw; x += 80) GUI.DrawTexture(new Rect(x, 0, 1, sh), _texWhite);
+        for (float y = 0; y < sh; y += 80) GUI.DrawTexture(new Rect(0, y, sw, 1), _texWhite);
+        GUI.color = Color.white;
+
+        float cardW = Mathf.Min(sw * 0.90f, 700f);
+        float cardH = 480f;
+        float cx = (sw - cardW) * 0.5f;
+        float cy = (sh - cardH) * 0.5f;
+
+        DrawRect(new Rect(cx, cy, cardW, cardH), ColBg);
+        DrawRect(new Rect(cx, cy, cardW, 2), ColAccent);
+
+        float lx = cx + 30f;
+        float ly = cy + 30f;
+
+        GUI.color = ColText;
+        GUI.Label(new Rect(lx, ly, 70, 70), "VTC",
+            new GUIStyle(_stTitle) { fontSize = 28, fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = ColAccent } });
+
+        GUI.Label(new Rect(lx + 80, ly + 4, 350, 34), "VTuberCam",
+            new GUIStyle(_stTitle) { fontSize = 24, normal = { textColor = ColText } });
+        GUI.Label(new Rect(lx + 82, ly + 36, 300, 20), "Selecciona tu avatar para iniciar",
+            new GUIStyle(_stHint) { fontSize = 11,
+                normal = { textColor = ColTextDim } });
+
+        float sepY = cy + 110f;
+        DrawRect(new Rect(cx + 20, sepY, cardW - 40, 1), ColSep);
+
+        float cxCenter = cx + cardW * 0.5f;
+        float btnW = 200f;
+        float btnH = 70f;
+        float gap = 20f;
+        float totalW = btnW * 2 + gap;
+        float startX = cxCenter - totalW * 0.5f;
+
+        // Botón Steve (Wide)
+        Rect steveBtn = new Rect(startX, sepY + 30f, btnW, btnH);
+        GUI.color = _skinWide ? ColAccent : Color.white;
+        if (GUI.Button(steveBtn, "Steve\n(Amplio / Wide)", new GUIStyle(_stBtnAcc) { fontSize = 14, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.black } }))
+        {
+            _skinWide = true;
+            if (avatarLoader != null)
+            {
+                avatarLoader.gltfPath = "Avatars/steve.gltf";
+                avatarLoader.textureFolder = "Avatars";
+                avatarLoader.isWide = true;
+                if (avatarLoader.Load())
+                {
+                    _avatarSelected = true;
+                    avatar = avatarLoader.driver;
+                    if (avatar != null) avatarRoot = avatar.transform;
+                    ActivateCameraAndStart();
+                }
+            }
+        }
+
+        // Botón Alex (Slim)
+        Rect alexBtn = new Rect(startX + btnW + gap, sepY + 30f, btnW, btnH);
+        GUI.color = !_skinWide ? ColAccent : Color.white;
+        if (GUI.Button(alexBtn, "Alex\n(Delgado / Slim)", new GUIStyle(_stBtnAcc) { fontSize = 14, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.black } }))
+        {
+            _skinWide = false;
+            if (avatarLoader != null)
+            {
+                avatarLoader.gltfPath = "Avatars/alex.gltf";
+                avatarLoader.textureFolder = "Avatars";
+                avatarLoader.isWide = false;
+                if (avatarLoader.Load())
+                {
+                    _avatarSelected = true;
+                    avatar = avatarLoader.driver;
+                    if (avatar != null) avatarRoot = avatar.transform;
+                    ActivateCameraAndStart();
+                }
+            }
+        }
+        GUI.color = Color.white;
+
+        // Mensaje si no hay AvatarLoader
+        if (avatarLoader == null)
+        {
+            GUI.Label(new Rect(cxCenter - 150, sepY + 120f, 300, 20),
+                "Asigna un AvatarLoader en el inspector", _stHint);
+        }
+
+        // Botón INICIAR (solo si hay avatar seleccionado)
+        if (_avatarSelected)
+        {
+            float btnBY = sepY + 140f;
+            Rect startBtn = new Rect(cxCenter - btnW * 0.5f, btnBY, btnW, btnH * 0.7f);
+            GUI.color = ColText;
+            GUIStyle stStart = new GUIStyle(_stBigBtn)
+            {
+                fontSize = 14, fontStyle = FontStyle.Bold,
+                normal = new GUIStyleState { background = _texBtnAcc, textColor = Color.white },
+                hover  = new GUIStyleState { background = _texBtnAccHov, textColor = Color.white }
+            };
+
+            if (GUI.Button(startBtn, "  INICIAR VTUBERCAM", stStart))
+                _showStartScreen = false;
+            GUI.color = Color.white;
+        }
+
+        GUI.Label(new Rect(cx, cy + cardH - 20f, cardW, 16),
+            "VTuberCam  |  Open Source  |  Unity + AI Pose Landmarker",
+            new GUIStyle(_stHint)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = ColTextDim }
+            });
+    }
+
+    void ActivateCameraAndStart()
+    {
+        _virtualCamActive = true;
+        if (!virtualCam && mainCamera)
+        {
+            virtualCam = mainCamera.GetComponent<UnityCapture>();
+            if (!virtualCam) virtualCam = mainCamera.gameObject.AddComponent<UnityCapture>();
+        }
+        if (virtualCam)
+        {
+            virtualCam.HideWarnings = true;
+            virtualCam.ResizeMode = UnityCapture.EResizeMode.LinearResize;
+            virtualCam.enabled = true;
+        }
+        PlayerPrefs.SetInt("vtb_vcam", 1); PlayerPrefs.Save();
+
+        if (mainCamera)
+        {
+            mainCamera.clearFlags = CameraClearFlags.SolidColor;
+            mainCamera.backgroundColor = DefaultBgColor;
+        }
+
+        // Posicionar el avatar frente a la cámara para que se vea en el Game view
+        if (avatarRoot != null && mainCamera != null)
+        {
+            float dist = 2.5f; // distancia frente a la cámara
+            avatarRoot.position = mainCamera.transform.position + mainCamera.transform.forward * dist;
+            avatarRoot.rotation = Quaternion.LookRotation(-mainCamera.transform.forward, Vector3.up);
+            _avatarInitPos   = avatarRoot.position;
+            _avatarInitRot   = avatarRoot.rotation;
+            _avatarInitScale = avatarRoot.localScale.x > 0 ? avatarRoot.localScale.x : 1f;
+        }
+
+        // Aplicar skin personalizada si existe
+        if (avatarLoader != null && !string.IsNullOrEmpty(_customSkinPath) && System.IO.File.Exists(_customSkinPath))
+        {
+            avatarLoader.SetCustomSkin(_customSkinPath);
+        }
+
+        EnsureTable();
+        if (table != null) table.SetVisible(true);
+
+        ApplySkin(); ApplyBlink(); ApplyAvatarTransform();
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    void DrawCardBegin()
+    {
+        GUILayout.BeginVertical(_stCard);
+        GUILayout.Space(2);
+    }
+
+    void DrawCardEnd()
+    {
+        GUILayout.Space(2);
+        GUILayout.EndVertical();
+    }
+
+    void DrawSection(string t)
+    {
+        GUILayout.Space(4);
+        GUILayout.Label(t, _stSection);
+        GUILayout.Space(4);
+    }
+
+    void DrawHint(string t)
+    {
+        GUILayout.Space(2);
+        GUILayout.Label(t, _stHint);
+        GUILayout.Space(2);
+    }
+
     void DrawStartLabel(float x, float y, string label, float alpha)
     {
-        GUI.Label(new Rect(x, y + 5, 108, 22), label,
-            new GUIStyle(_stBody)
-            { normal = { textColor = new Color(ColTextDim.r, ColTextDim.g, ColTextDim.b, alpha) }, fontSize = 11 });
+        GUI.Label(new Rect(x, y + 4, 100, 20), label,
+            new GUIStyle(_stBody) { normal = { textColor = ColTextDim }, fontSize = 10 });
     }
 
     bool DrawStartBtn(float x, float y, float bw, float bh, string label, bool selected, float alpha)
     {
-        GUI.color = new Color(1f, 1f, 1f, alpha);
-        GUIStyle st = new GUIStyle(_stBtnNorm)
-        {
-            fontSize = 11,
-            normal = new GUIStyleState
-            {
-                background = selected ? _texBtnCyan : _texBtn,
-                textColor  = selected ? new Color(0.02f,0.02f,0.06f)
-                                      : new Color(ColText.r, ColText.g, ColText.b, alpha)
-            },
-            hover = new GUIStyleState { background = _texBtnCyanHov, textColor = Color.black }
-        };
+        GUIStyle st = selected ? _stBtnAcc : _stBtnNorm;
         bool r = GUI.Button(new Rect(x, y, bw, bh), label, st);
-        GUI.color = Color.white;
         return r;
     }
 
     void DrawShortcutRow(float x, float y, string key, string desc, float alpha)
     {
-        GUI.Label(new Rect(x, y, 120, 20), key,
-            new GUIStyle(_stBody)
-            { fontStyle = FontStyle.Bold,
-              normal = { textColor = new Color(ColCyan.r, ColCyan.g, ColCyan.b, alpha) }, fontSize = 10 });
-        GUI.Label(new Rect(x + 124, y, 160, 20), desc,
-            new GUIStyle(_stHint)
-            { normal = { textColor = new Color(ColTextDim.r, ColTextDim.g, ColTextDim.b, alpha) }, fontSize = 10 });
+        GUI.Label(new Rect(x, y, 110, 18), key,
+            new GUIStyle(_stBody) { fontStyle = FontStyle.Bold, normal = { textColor = ColAccent }, fontSize = 9 });
+        GUI.Label(new Rect(x + 114, y, 150, 18), desc,
+            new GUIStyle(_stBody) { normal = { textColor = ColText }, fontSize = 9 });
     }
 
     void DrawRect(Rect r, Color c)
@@ -735,77 +811,31 @@ public class VTuberSettingsUI : MonoBehaviour
         GUI.color = Color.white;
     }
 
-    // ─── Helpers de panel ────────────────────────────────────────────────────
-    void DrawSection(string t)
-    {
-        GUILayout.Space(10);
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        GUILayout.Label(t, _stSection);
-        GUILayout.EndHorizontal();
-        SeparatorGlow();
-    }
-    void DrawHint(string t)
-    {
-        GUILayout.BeginHorizontal(); GUILayout.Space(14);
-        GUILayout.Label(t, _stHint);
-        GUILayout.EndHorizontal();
-    }
-    void DrawStep(string n, string t)
-    {
-        GUILayout.BeginHorizontal(); GUILayout.Space(14);
-        GUILayout.Label(n + ".", new GUIStyle(_stHint)
-            { normal = { textColor = ColCyan }, fontStyle = FontStyle.Bold }, GUILayout.Width(16));
-        GUILayout.Label(t, _stHint);
-        GUILayout.EndHorizontal();
-    }
-    void BtnCyan(string label, System.Action onClick)
+    void BtnAcc(string label, System.Action onClick)
     {
         GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        if (GUILayout.Button(label, _stBtnCyan, GUILayout.Width(_panelW - 24), GUILayout.Height(28)))
+        if (GUILayout.Button(label, _stBtnAcc, GUILayout.Height(28)))
             onClick();
         GUILayout.EndHorizontal();
-        GUILayout.Space(2);
+        GUILayout.Space(4);
     }
-    void BtnPurple(string label, System.Action onClick)
-    {
-        GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        if (GUILayout.Button(label, _stBtnPurple, GUILayout.Width(_panelW - 24), GUILayout.Height(28)))
-            onClick();
-        GUILayout.EndHorizontal();
-        GUILayout.Space(2);
-    }
-    void SeparatorGlow()
-    {
-        GUI.color = ColSep;
-        GUILayout.Box("", GUILayout.ExpandWidth(true), GUILayout.Height(1));
-        GUI.color = Color.white;
-    }
+
     void SliderFull(string label, string valStr, ref float val, float min, float max,
         System.Action<float> onChange, float threshold = 0.01f)
     {
         GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        GUILayout.Label(label, _stBody, GUILayout.Width(90));
+        GUILayout.Label(label, _stBody, GUILayout.Width(110));
         GUILayout.Label(valStr,
-            new GUIStyle(_stBody) { normal = { textColor = ColCyan }, alignment = TextAnchor.MiddleRight },
+            new GUIStyle(_stBody) { normal = { textColor = ColAccent }, alignment = TextAnchor.MiddleRight },
             GUILayout.Width(52));
         GUILayout.EndHorizontal();
         GUILayout.BeginHorizontal(); GUILayout.Space(10);
-        float nv = GUILayout.HorizontalSlider(val, min, max, GUILayout.Width(_panelW - 24));
+        float nv = GUILayout.HorizontalSlider(val, min, max, GUILayout.Width(220));
         GUILayout.EndHorizontal();
         if (Mathf.Abs(nv - val) > threshold) { val = nv; onChange(val); }
-    }
-    void SliderRGB(string label, ref float val, Color labelColor)
-    {
-        GUILayout.BeginHorizontal(); GUILayout.Space(14);
-        GUILayout.Label(label,
-            new GUIStyle(_stBody) { normal = { textColor = labelColor }, fontStyle = FontStyle.Bold },
-            GUILayout.Width(14));
-        val = GUILayout.HorizontalSlider(val, 0f, 1f, GUILayout.Width(_panelW - 76));
-        GUILayout.Label(((int)(val * 255)).ToString(), _stBody, GUILayout.Width(28));
-        GUILayout.EndHorizontal();
+        GUILayout.Space(6);
     }
 
-    // ─── Apply helpers ────────────────────────────────────────────────────────
     void ApplySkin()
     {
         if (wideModel) wideModel.SetActive(_skinWide);
@@ -817,84 +847,184 @@ public class VTuberSettingsUI : MonoBehaviour
         if (avatar) avatar.blinkEnabled = _blink;
         PlayerPrefs.SetInt("vtb_blink", _blink ? 1 : 0); PlayerPrefs.Save();
     }
-    void ApplyChroma()
-    {
-        Color col = (_chromaIdx >= 0 && _chromaIdx < _presets.Length) ? _presets[_chromaIdx] : _customColor;
-        if (mainCamera) { mainCamera.clearFlags = CameraClearFlags.SolidColor; mainCamera.backgroundColor = col; }
-        PlayerPrefs.SetInt("vtb_chromaIdx", _chromaIdx); PlayerPrefs.Save();
-    }
 
-    // ─── Construcción de estilos / texturas ──────────────────────────────────
     void BuildStyles()
     {
-        _texWhite        = MakeTex(Color.white);
-        _texPanel        = MakeTex(ColPanel);
-        _texCard         = MakeTex(ColCard);
-        _texBtn          = MakeTex(ColBtnBg);
-        _texBtnHov       = MakeTex(ColBtnHov);
-        _texBtnCyan      = MakeTex(ColCyan);
-        _texBtnCyanHov   = MakeTex(new Color(0.20f, 1.00f, 1.00f));
-        _texBtnPurp      = MakeTex(ColPurpleDim);
-        _texBtnPurpHov   = MakeTex(ColPurple);
-        _texBtnDanger    = MakeTex(ColDanger);
-        _texBtnDangerHov = MakeTex(new Color(1.0f, 0.35f, 0.45f));
-        _texBtnSel       = MakeTex(ColCyanDim);
+        _texWhite   = MakeTex(Color.white);
+        _texBg      = MakeTex(ColBg);
+        _texCard    = MakeTex(ColBgLight);
+        _texBtn     = MakeTex(new Color(0.22f, 0.25f, 0.32f, 1.0f));
+        _texBtnHov  = MakeTex(new Color(0.30f, 0.33f, 0.42f, 1.0f));
+        _texBtnAcc  = MakeTex(ColAccent);
+        _texBtnAccHov = MakeTex(ColAccentD);
+        _texBtnDanger = MakeTex(ColDanger);
+        _texBtnDangerHov = MakeTex(new Color(0.80f, 0.20f, 0.20f, 1.0f));
+        _texBtnTab    = MakeTex(new Color(0.20f, 0.22f, 0.28f, 1.0f));
+        _texBtnTabSel = MakeTex(ColAccent);
 
-        GUIStyleState S(Texture2D b, Color c) =>
-            new GUIStyleState { background = b, textColor = c };
+        _stTitle   = new GUIStyle { normal = { textColor = ColText }, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+        _stSection = new GUIStyle(_stTitle) { fontSize = 11, normal = { textColor = ColAccent }, fontStyle = FontStyle.Bold };
+        _stBody    = new GUIStyle { normal = { textColor = ColText } };
+        _stHint    = new GUIStyle { normal = { textColor = ColTextDim } };
+        _stBigBtn  = new GUIStyle { normal = { background = _texBtnAcc }, fontSize = 13, alignment = TextAnchor.MiddleCenter };
 
-        _stTitle   = new GUIStyle(GUI.skin.label)
-            { fontSize = 15, fontStyle = FontStyle.Bold, normal = { textColor = Color.white } };
-        _stSection = new GUIStyle(GUI.skin.label)
-            { fontSize = 10, fontStyle = FontStyle.Bold, normal = { textColor = ColCyan } };
-        _stBody    = new GUIStyle(GUI.skin.label)
-            { fontSize = 11, normal = { textColor = ColText } };
-        _stHint    = new GUIStyle(GUI.skin.label)
-            { fontSize = 10, wordWrap = true, normal = { textColor = ColTextDim } };
-
-        _stBtnNorm = new GUIStyle(GUI.skin.button)
+        _stBtnNorm = new GUIStyle
         {
-            fontSize = 11, alignment = TextAnchor.MiddleCenter,
-            normal = S(_texBtn,    ColText),
-            hover  = S(_texBtnHov, Color.white),
-            active = S(_texBtnSel, Color.white)
+            normal = { background = _texBtn, textColor = ColText },
+            hover  = { background = _texBtnHov, textColor = ColText },
+            fontSize = 11,
+            alignment = TextAnchor.MiddleCenter,
+            border = new RectOffset(6, 6, 6, 6)
         };
         _stBtnSel = new GUIStyle(_stBtnNorm)
         {
-            fontStyle = FontStyle.Bold,
-            normal = S(_texBtnSel, new Color(0.02f,0.02f,0.06f)),
-            hover  = S(_texBtnSel, Color.black)
+            normal = { background = _texBtnAcc, textColor = Color.white },
+            hover = { background = _texBtnAccHov, textColor = Color.white }
         };
-        _stBtnCyan = new GUIStyle(_stBtnNorm)
+        _stBtnAcc = new GUIStyle(_stBtnNorm)
         {
-            fontStyle = FontStyle.Bold,
-            normal = S(_texBtnCyan,    new Color(0.02f,0.02f,0.06f)),
-            hover  = S(_texBtnCyanHov, Color.black),
-            active = S(_texBtnCyanHov, Color.black)
-        };
-        _stBtnPurple = new GUIStyle(_stBtnNorm)
-        {
-            fontStyle = FontStyle.Bold,
-            normal = S(_texBtnPurp,    Color.white),
-            hover  = S(_texBtnPurpHov, Color.white)
+            normal = { background = _texBtnAcc, textColor = Color.white },
+            hover = { background = _texBtnAccHov, textColor = Color.white }
         };
         _stBtnDanger = new GUIStyle(_stBtnNorm)
         {
-            fontSize = 12, fontStyle = FontStyle.Bold,
-            normal = S(_texBtnDanger,    Color.white),
-            hover  = S(_texBtnDangerHov, Color.white)
+            normal = { background = _texBtnDanger, textColor = Color.white },
+            hover = { background = _texBtnDangerHov, textColor = Color.white }
         };
-        _stBigBtn = new GUIStyle(GUI.skin.button)
+        _stBtnTab = new GUIStyle(_stBtnNorm)
         {
-            fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
-            normal = S(_texBtnCyan,    new Color(0.02f,0.02f,0.06f)),
-            hover  = S(_texBtnCyanHov, Color.black),
-            active = S(_texBtnCyanHov, Color.black)
+            normal = { background = _texBtnTab, textColor = ColTextDim },
+            hover = { background = _texBtnHov, textColor = ColText },
+            fontSize = 10
+        };
+        _stBtnTabSel = new GUIStyle(_stBtnTab)
+        {
+            normal = { background = _texBtnTabSel, textColor = Color.black },
+            hover = { background = _texBtnAcc, textColor = Color.black }
+        };
+
+        _stCard = new GUIStyle
+        {
+            normal = { background = _texCard },
+            border = new RectOffset(8, 8, 8, 8),
+            padding = new RectOffset(10, 10, 8, 8)
+        };
+
+        // ── Checkbox redondeado (estilo imagen 2) ──
+        _texCheckOff = MakeRoundedRect(24, new Color(0.22f, 0.25f, 0.32f, 1f), new Color(0.45f, 0.50f, 0.60f, 1f));
+        _texCheckOn  = MakeRoundedRect(24, ColAccent, ColAccentD);
+        // Dibujar check blanco sobre el checked
+        var check = MakeCheckMark(24, Color.white);
+        for (int y = 0; y < check.height; y++)
+            for (int x = 0; x < check.width; x++)
+            {
+                Color c = check.GetPixel(x, y);
+                if (c.a > 0.1f) _texCheckOn.SetPixel(x, y, c);
+            }
+        _texCheckOn.Apply();
+
+        _stCheck = new GUIStyle
+        {
+            normal = { textColor = ColText },
+            fontSize = 11,
+            alignment = TextAnchor.MiddleLeft
         };
 
         _stylesReady = true;
     }
 
+    // ── Checkbox personalizado ───────────────────────────────────────────────
+    bool Checkbox(bool value, string label)
+    {
+        Rect r = GUILayoutUtility.GetRect(0, 26, GUILayout.ExpandWidth(true));
+        r.x += 10; r.width -= 10;
+        Rect box = new Rect(r.x, r.y + (r.height - 20f) * 0.5f, 20f, 20f);
+        Event e = Event.current;
+        bool over = r.Contains(e.mousePosition);
+
+        if (e.type == EventType.Repaint)
+        {
+            GUI.DrawTexture(box, value ? _texCheckOn : _texCheckOff);
+            GUI.color = over ? Color.white : new Color(1f, 1f, 1f, 0.9f);
+            GUI.Label(new Rect(box.xMax + 8f, r.y, r.width - 30f, r.height), label, _stCheck);
+            GUI.color = Color.white;
+        }
+        else if (e.type == EventType.MouseDown && e.button == 0 && over)
+        {
+            value = !value;
+            GUI.changed = true;
+            e.Use();
+        }
+        return value;
+    }
+
+    // ── Checkbox helpers ─────────────────────────────────────────────────────
+    static Texture2D MakeRoundedRect(int size, Color bg, Color border)
+    {
+        var t = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        t.filterMode = FilterMode.Bilinear;
+        Color[] px = new Color[size * size];
+        float half = size * 0.5f;
+        float cr   = size * 0.25f; // radio de esquina
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float qx = Mathf.Abs(x + 0.5f - half) - (half - cr);
+                float qy = Mathf.Abs(y + 0.5f - half) - (half - cr);
+                float outside = new Vector2(Mathf.Max(qx, 0f), Mathf.Max(qy, 0f)).magnitude;
+                float dist = outside + Mathf.Min(Mathf.Max(qx, qy), 0f) - cr; // <0 = dentro
+                float a = Mathf.Clamp01(0.5f - dist);                          // antialias
+                Color c = dist > -2f ? border : bg;                            // borde de 2px
+                c.a *= a;
+                px[y * size + x] = c;
+            }
+        }
+        t.SetPixels(px);
+        t.Apply();
+        return t;
+    }
+
+    static Texture2D MakeCheckMark(int size, Color color)
+    {
+        var t = new Texture2D(size, size);
+        Color[] px = new Color[size * size];
+        for (int i = 0; i < px.Length; i++) px[i] = new Color(0,0,0,0);
+        // Dibujar check: dos líneas que forman una marca
+        int thick = Mathf.Max(1, size / 16);
+        // Línea 1: de (0.35,0.5) a (0.5,0.65)
+        // Línea 2: de (0.5,0.65) a (0.75,0.3)
+        DrawLine(t, px, size, size*0.27f, size*0.50f, size*0.43f, size*0.32f, thick, color);
+        DrawLine(t, px, size, size*0.43f, size*0.32f, size*0.75f, size*0.70f, thick, color);
+        t.SetPixels(px);
+        t.Apply();
+        return t;
+    }
+
+    static void DrawLine(Texture2D t, Color[] px, int size, float x0, float y0, float x1, float y1, int thick, Color c)
+    {
+        int steps = Mathf.Max(Mathf.Abs(Mathf.RoundToInt(x1-x0)), Mathf.Abs(Mathf.RoundToInt(y1-y0))) * 2 + 2;
+        for (int i = 0; i <= steps; i++)
+        {
+            float t0 = i / (float)steps;
+            float x = Mathf.Lerp(x0, x1, t0);
+            float y = Mathf.Lerp(y0, y1, t0);
+            for (int dy = -thick; dy <= thick; dy++)
+                for (int dx = -thick; dx <= thick; dx++)
+                {
+                    int ix = Mathf.RoundToInt(x) + dx;
+                    int iy = Mathf.RoundToInt(y) + dy;
+                    if (ix >= 0 && ix < size && iy >= 0 && iy < size)
+                        px[iy * size + ix] = c;
+                }
+        }
+    }
+
     static Texture2D MakeTex(Color c)
-    { var t = new Texture2D(1,1); t.SetPixel(0,0,c); t.Apply(); return t; }
+    {
+        var t = new Texture2D(1, 1);
+        t.SetPixel(0, 0, c);
+        t.Apply();
+        return t;
+    }
 }

@@ -90,10 +90,6 @@ public class UnityCapture : MonoBehaviour
         }
 
         var result = CaptureInterface.SendTexture(source, Timeout, DoubleBuffering, ResizeMode, MirrorMode);
-        if (_debugFrameCount++ % 120 == 0)
-        {
-            Debug.Log($"[UnityCapture] Enviando a OBS -> Resultado: {result} (Res: {source?.width}x{source?.height})");
-        }
 
         switch (result)
         {
