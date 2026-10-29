@@ -212,31 +212,85 @@ public class PoseAvatarDriver : MonoBehaviour
     // ───────────────────────── Ciclo de vida ─────────────────────────
     void Awake()
     {
-        // Brazos como hijos del torso: los hombros giran y orbitan pegados al cuerpo.
+        // Si el driver está puesto a mano en la escena con referencias asignadas,
+        // inicializar como antes. AvatarLoader llama a Bind() para el caso dinámico.
+        if (torso != null || head != null || rightArm != null || leftArm != null)
+            Bind(torso, head, rightArm, leftArm);
+    }
+
+    /// <summary>
+    /// Vuelve a ligar el driver a un nuevo conjunto de huesos tras cambiar de avatar.
+    /// Se llama desde AvatarLoader.Load() después de destruir el avatar anterior.
+    /// También sirve como inicializador cuando el driver se pone a mano en la escena.
+    /// </summary>
+    public void Bind(Transform newTorso, Transform newHead, Transform newRight, Transform newLeft)
+    {
+        torso    = newTorso;
+        head     = newHead;
+        rightArm = newRight;
+        leftArm  = newLeft;
+
+        // Los brazos como hijos del torso: giran y orbitan pegados al cuerpo
         if (torso != null)
         {
             if (rightArm != null && rightArm.parent != torso) rightArm.SetParent(torso, true);
-            if (leftArm != null && leftArm.parent != torso) leftArm.SetParent(torso, true);
+            if (leftArm  != null && leftArm.parent  != torso) leftArm.SetParent(torso, true);
         }
 
-        _origRestTorso = torso ? torso.localRotation : Quaternion.identity;
-        _origRestHead = head ? head.localRotation : Quaternion.identity;
+        // Guardar rotaciones originales de reposo
+        _origRestTorso = torso    ? torso.localRotation    : Quaternion.identity;
+        _origRestHead  = head     ? head.localRotation     : Quaternion.identity;
         _origRestRight = rightArm ? rightArm.localRotation : Quaternion.identity;
-        _origRestLeft = leftArm ? leftArm.localRotation : Quaternion.identity;
+        _origRestLeft  = leftArm  ? leftArm.localRotation  : Quaternion.identity;
 
         restTorso = _origRestTorso; restHead = _origRestHead;
         restRight = _origRestRight; restLeft = _origRestLeft;
+
+        // Reiniciar estado de animación
         tTorso = restTorso; tHead = restHead;
-        _right.smoothed = restRight;
-        _left.smoothed = restLeft;
+        ResetArm(_right, restRight);
+        ResetArm(_left,  restLeft);
+
         SetupBreathing();
+
+        // Reiniciar contadores y filtros para que la calibración empiece limpia
+        _validFrameCount = 0;
+        _hasHeadCalib    = false;
+        _headCalibFrames = 0; _earCalibFrames = 0;
+        _accumNoseDrop   = 0f; _accumEarDelta = 0f; _accumNoseSq = 0f;
+        _smoothInit      = false;
+        _hYaw = _hPitch = _hRoll = 0f;
+        _fInit = false;
+
+        // Liberar instancias de material antiguas y capturar las del avatar actual
+        RebindSkinMaterials();
+
+        Debug.Log($"[PoseAvatarDriver] Bind — torso={torso?.name ?? "null"}" +
+                  $" head={head?.name ?? "null"}" +
+                  $" rightArm={rightArm?.name ?? "null"}" +
+                  $" leftArm={leftArm?.name ?? "null"}");
+    }
+
+    /// <summary>
+    /// Vuelve a capturar las instancias de material de los renderers actuales.
+    /// Hay que llamarlo SIEMPRE después de reemplazar los sharedMaterials de la skin
+    /// (si no, el parpadeo seguiría pintando la skin vieja y se perderían los cambios).
+    /// </summary>
+    public void RebindSkinMaterials()
+    {
+        // Las instancias anteriores ya no las usa ningún renderer cuando se llama
+        // desde Bind() (avatar nuevo) o desde AvatarLoader tras aplicar la skin.
+        if (skinMats != null)
+            foreach (var m in skinMats) if (m) Destroy(m);
+        skinMats = null;
 
         renderers = GetComponentsInChildren<Renderer>(true);
 
-        // Instancias de material propias (no tocan el archivo original)
+        // Instancias de material propias (no tocan los assets originales)
         var mats = new System.Collections.Generic.List<Material>();
         foreach (var r in renderers) if (r) mats.AddRange(r.materials);
         skinMats = mats.ToArray();
+
         if (skinOpen) ApplySkin(skinOpen);
     }
 

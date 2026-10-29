@@ -41,6 +41,18 @@ public class VTuberSettingsUI : MonoBehaviour
     float _startTime;
     float _pulseT    = 0f;
 
+    // ─── Acciones diferidas ───────────────────────────────────────────────────
+    // OnGUI es muy sensible: cargar el modelo o aplicar una textura desde dentro
+    // de OnGUI (sobre todo si lanza) rompe el layout de IMGUI ("Invalid GUILayout
+    // state"). Por eso los botones solo dejan una petición y Update() la ejecuta.
+    bool   _pendingAvatarLoad;
+    bool   _pendingWide;
+    bool   _pendingSkinApply;
+    string _pendingSkinPath  = "";
+    bool   _pendingSkinClear;
+    string _lastAppliedSkinPath = "";
+    int    _cardDepth;   // tarjetas GUILayout abiertas (para poder cerrarlas si algo falla)
+
     // ─── Categoría activa ────────────────────────────────────────────────────
     // 0 = General, 1 = Expresiones, 2 = Extras
     int _activeCategory = 0;
@@ -70,6 +82,11 @@ public class VTuberSettingsUI : MonoBehaviour
 
     [Header("Escala Inicial por Defecto")]
     public float defaultScale = 2.2f;
+
+    [Header("Encuadre")]
+    [Tooltip("Fracción de la altura de pantalla que ocupa el avatar al cargar (0.3 = pequeño, 1 = llena todo).")]
+    [Range(0.3f, 1f)]
+    public float avatarScreenFill = 0.80f;
 
     // ─── Colores minimalistas ────────────────────────────────────────────────
     static readonly Color ColBg      = new Color(0.12f, 0.14f, 0.18f, 0.92f);   // fondo translúcido
@@ -165,6 +182,23 @@ public class VTuberSettingsUI : MonoBehaviour
     void Update()
     {
         _pulseT += Time.deltaTime;
+
+        // Ejecutar aquí (nunca dentro de OnGUI) las acciones pesadas pedidas por la UI.
+        if (_pendingAvatarLoad)
+        {
+            _pendingAvatarLoad = false;
+            LoadAvatarNow(_pendingWide);
+        }
+
+        if (_pendingSkinApply)
+        {
+            _pendingSkinApply = false;
+            string path = _pendingSkinPath;
+            _pendingSkinPath = "";
+            bool clear = _pendingSkinClear;
+            _pendingSkinClear = false;
+            ApplySkinNow(clear ? "" : path);
+        }
 
         if (!_showStartScreen)
         {
@@ -322,11 +356,26 @@ public class VTuberSettingsUI : MonoBehaviour
 
         GUILayout.Space(12);
 
-        switch (_activeCategory)
+        // Si una categoría lanzara una excepción, cerrar a mano las tarjetas que
+        // hayan quedado abiertas evita el "Invalid GUILayout state" permanente.
+        try
         {
-            case 0: DrawCategoryGeneral(); break;
-            case 1: DrawCategoryExpresiones(); break;
-            case 2: DrawCategoryExtras(); break;
+            switch (_activeCategory)
+            {
+                case 0: DrawCategoryGeneral(); break;
+                case 1: DrawCategoryExpresiones(); break;
+                case 2: DrawCategoryExtras(); break;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError("[VTuberSettingsUI] Error dibujando la categoría: " + ex);
+            while (_cardDepth > 0)
+            {
+                try { GUILayout.EndVertical(); } catch { break; }
+                _cardDepth--;
+            }
+            _cardDepth = 0;
         }
 
         GUILayout.EndArea();
@@ -528,6 +577,9 @@ public class VTuberSettingsUI : MonoBehaviour
         }
 
         GUILayout.Space(8);
+        DrawCardEnd();   // cerrar la tarjeta "Extras" (faltaba: rompía GUILayout)
+
+        GUILayout.Space(12);
 
         // ── Skin personalizada ──
         DrawCardBegin();
@@ -538,20 +590,24 @@ public class VTuberSettingsUI : MonoBehaviour
         _customSkinPath = GUILayout.TextField(_customSkinPath, _stBody, GUILayout.Height(24));
         GUILayout.EndHorizontal();
 
+        // Si pegas/escribes una ruta válida, aplicarla sin esperar al botón.
+        // Se compara con la última aplicada para no re-aplicar en cada GUI.changed.
+        if (GUI.changed && !string.IsNullOrEmpty(_customSkinPath)
+            && _customSkinPath != _lastAppliedSkinPath
+            && System.IO.File.Exists(_customSkinPath))
+        {
+            ApplyCustomSkinPath();
+        }
+
         GUILayout.BeginHorizontal(); GUILayout.Space(10);
 #if UNITY_EDITOR
         if (GUILayout.Button("Buscar skin (.png)", _stBtnAcc, GUILayout.Height(26)))
         {
-            var path = UnityEditor.EditorUtility.OpenFilePanel("Seleccionar skin", "", "png");
+            string path = UnityEditor.EditorUtility.OpenFilePanel("Seleccionar skin", "", "png");
             if (!string.IsNullOrEmpty(path))
             {
                 _customSkinPath = path;
-                if (avatarLoader != null)
-                {
-                    avatarLoader.SetCustomSkin(_customSkinPath);
-                    PlayerPrefs.SetString("vtb_customSkinPath", _customSkinPath);
-                    PlayerPrefs.Save();
-                }
+                ApplyCustomSkinPath();
             }
         }
 #else
@@ -572,17 +628,46 @@ public class VTuberSettingsUI : MonoBehaviour
             if (GUILayout.Button("Quitar skin personalizada", _stBtnDanger, GUILayout.Height(24)))
             {
                 _customSkinPath = "";
-                PlayerPrefs.SetString("vtb_customSkinPath", "");
-                PlayerPrefs.Save();
-                if (avatarLoader != null)
-                {
-                    avatarLoader.SetCustomSkin("");
-                }
+                ApplyCustomSkinPath();
             }
         }
 
         DrawHint("Selecciona un archivo .png para usarlo como skin del avatar. Se guarda para la próxima vez.");
         DrawCardEnd();
+    }
+
+    /// <summary>
+    /// Pide aplicar la skin personalizada actual (o volver a la skin por defecto si
+    /// el campo está vacío). Solo deja la petición: el trabajo real lo hace
+    /// Update() -> ApplySkinNow(), porque hacerlo en OnGUI puede romper IMGUI.
+    /// </summary>
+    void ApplyCustomSkinPath()
+    {
+        if (!string.IsNullOrEmpty(_customSkinPath) && !System.IO.File.Exists(_customSkinPath))
+            return;
+
+        PlayerPrefs.SetString("vtb_customSkinPath", _customSkinPath ?? "");
+        PlayerPrefs.Save();
+
+        _pendingSkinApply = true;
+        _pendingSkinClear = string.IsNullOrEmpty(_customSkinPath);
+        _pendingSkinPath  = _customSkinPath ?? "";
+    }
+
+    /// <summary>Ejecuta la aplicación de skin en curso. Se llama desde Update().</summary>
+    void ApplySkinNow(string path)
+    {
+        if (avatarLoader == null) return;
+
+        try
+        {
+            avatarLoader.SetCustomSkin(path);
+            _lastAppliedSkinPath = path ?? "";
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError("[VTuberSettingsUI] Error al aplicar la skin: " + ex);
+        }
     }
 
     // ─── PANTALLA DE INICIO ───────────────────────────────────────────────────
@@ -637,43 +722,13 @@ public class VTuberSettingsUI : MonoBehaviour
         Rect steveBtn = new Rect(startX, sepY + 30f, btnW, btnH);
         GUI.color = _skinWide ? ColAccent : Color.white;
         if (GUI.Button(steveBtn, "Steve\n(Amplio / Wide)", new GUIStyle(_stBtnAcc) { fontSize = 14, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.black } }))
-        {
-            _skinWide = true;
-            if (avatarLoader != null)
-            {
-                avatarLoader.gltfPath = "Avatars/steve.gltf";
-                avatarLoader.textureFolder = "Avatars";
-                avatarLoader.isWide = true;
-                if (avatarLoader.Load())
-                {
-                    _avatarSelected = true;
-                    avatar = avatarLoader.driver;
-                    if (avatar != null) avatarRoot = avatar.transform;
-                    ActivateCameraAndStart();
-                }
-            }
-        }
+            SelectAvatar(true);
 
         // Botón Alex (Slim)
         Rect alexBtn = new Rect(startX + btnW + gap, sepY + 30f, btnW, btnH);
         GUI.color = !_skinWide ? ColAccent : Color.white;
         if (GUI.Button(alexBtn, "Alex\n(Delgado / Slim)", new GUIStyle(_stBtnAcc) { fontSize = 14, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.black } }))
-        {
-            _skinWide = false;
-            if (avatarLoader != null)
-            {
-                avatarLoader.gltfPath = "Avatars/alex.gltf";
-                avatarLoader.textureFolder = "Avatars";
-                avatarLoader.isWide = false;
-                if (avatarLoader.Load())
-                {
-                    _avatarSelected = true;
-                    avatar = avatarLoader.driver;
-                    if (avatar != null) avatarRoot = avatar.transform;
-                    ActivateCameraAndStart();
-                }
-            }
-        }
+            SelectAvatar(false);
         GUI.color = Color.white;
 
         // Mensaje si no hay AvatarLoader
@@ -710,6 +765,50 @@ public class VTuberSettingsUI : MonoBehaviour
             });
     }
 
+    /// <summary>
+    /// Botón de la pantalla de inicio: solo registra la elección. La carga real
+    /// se hace en Update() -> LoadAvatarNow() para no romper el layout de IMGUI.
+    /// </summary>
+    void SelectAvatar(bool wide)
+    {
+        _skinWide          = wide;
+        _pendingWide       = wide;
+        _pendingAvatarLoad = true;
+    }
+
+    /// <summary>
+    /// Carga el avatar elegido. Se ejecuta desde Update(), nunca desde OnGUI.
+    /// No deja escapar excepciones.
+    /// </summary>
+    void LoadAvatarNow(bool wide)
+    {
+        _skinWide = wide;
+
+        if (avatarLoader == null)
+        {
+            Debug.LogWarning("[VTuberSettingsUI] No hay AvatarLoader: no se puede cargar el avatar.");
+            return;
+        }
+
+        avatarLoader.gltfPath      = wide ? "Avatars/steve.gltf" : "Avatars/alex.gltf";
+        avatarLoader.textureFolder = "Avatars";
+        avatarLoader.isWide        = wide;
+
+        try
+        {
+            if (!avatarLoader.Load()) return;
+
+            _avatarSelected = true;
+            avatar = avatarLoader.driver;
+            if (avatar != null) avatarRoot = avatar.transform;
+            ActivateCameraAndStart();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("[VTuberSettingsUI] Error al cargar el avatar: " + e);
+        }
+    }
+
     void ActivateCameraAndStart()
     {
         _virtualCamActive = true;
@@ -732,27 +831,68 @@ public class VTuberSettingsUI : MonoBehaviour
             mainCamera.backgroundColor = DefaultBgColor;
         }
 
-        // Posicionar el avatar frente a la cámara para que se vea en el Game view
+        // Posicionar y orientar el avatar frente a la cámara.
+        // OJO: la cara del modelo glTF está en Z NEGATIVO (comprobado en los vértices
+        // del head front), así que su +Z debe apuntar en la dirección de visión para
+        // que la cara quede mirando a la cámara. Con -forward se veía de espaldas.
         if (avatarRoot != null && mainCamera != null)
         {
-            float dist = 2.5f; // distancia frente a la cámara
+            float dist = 2.5f; // distancia provisional; FrameAvatar() la recalcula
             avatarRoot.position = mainCamera.transform.position + mainCamera.transform.forward * dist;
-            avatarRoot.rotation = Quaternion.LookRotation(-mainCamera.transform.forward, Vector3.up);
+            avatarRoot.rotation = Quaternion.LookRotation(mainCamera.transform.forward, Vector3.up);
             _avatarInitPos   = avatarRoot.position;
             _avatarInitRot   = avatarRoot.rotation;
             _avatarInitScale = avatarRoot.localScale.x > 0 ? avatarRoot.localScale.x : 1f;
         }
 
-        // Aplicar skin personalizada si existe
+        // Aplicar skin personalizada si existe (estamos en Update: es seguro)
         if (avatarLoader != null && !string.IsNullOrEmpty(_customSkinPath) && System.IO.File.Exists(_customSkinPath))
         {
-            avatarLoader.SetCustomSkin(_customSkinPath);
+            ApplySkinNow(_customSkinPath);
         }
 
         EnsureTable();
         if (table != null) table.SetVisible(true);
 
         ApplySkin(); ApplyBlink(); ApplyAvatarTransform();
+
+        // Encuadre automático: calcula la distancia según el tamaño real del modelo
+        FrameAvatar();
+    }
+
+    /// <summary>
+    /// Coloca el avatar a la distancia justa para que se vea completo y centrado,
+    /// usando los bounds reales del modelo. Así no importa el tamaño nativo del
+    /// glTF ni el valor de escala: siempre entra en el Game view.
+    /// </summary>
+    void FrameAvatar()
+    {
+        if (!avatarRoot || !mainCamera) return;
+
+        bool hasBounds = false;
+        Bounds b = new Bounds(avatarRoot.position, Vector3.one);
+        foreach (var r in avatarRoot.GetComponentsInChildren<Renderer>())
+        {
+            if (!r || !r.enabled) continue;
+            if (!hasBounds) { b = r.bounds; hasBounds = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        if (!hasBounds) return;
+
+        // Altura visible necesaria para que el avatar ocupe `avatarScreenFill`
+        float fill = Mathf.Clamp(avatarScreenFill, 0.3f, 1f);
+        float visibleH = b.size.y / fill;
+        float fovRad = mainCamera.fieldOfView * Mathf.Deg2Rad;
+        float dist = (visibleH * 0.5f) / Mathf.Max(0.01f, Mathf.Tan(fovRad * 0.5f));
+        dist = Mathf.Clamp(dist, 0.4f, 50f);
+
+        // Punto del eje de la cámara donde debe quedar el centro del avatar
+        Vector3 targetCenter = mainCamera.transform.position
+                             + mainCamera.transform.forward * dist;
+
+        // Desplazar el avatar para que el centro de sus bounds caiga en ese punto
+        _avatarInitPos += targetCenter - b.center;
+        ApplyAvatarTransform();
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -760,6 +900,7 @@ public class VTuberSettingsUI : MonoBehaviour
     void DrawCardBegin()
     {
         GUILayout.BeginVertical(_stCard);
+        _cardDepth++;
         GUILayout.Space(2);
     }
 
@@ -767,6 +908,7 @@ public class VTuberSettingsUI : MonoBehaviour
     {
         GUILayout.Space(2);
         GUILayout.EndVertical();
+        if (_cardDepth > 0) _cardDepth--;
     }
 
     void DrawSection(string t)

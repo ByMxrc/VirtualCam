@@ -10,12 +10,19 @@ using UnityEngine.Rendering;
 /// Carga un modelo .gltf (exportado de Blockbench) en runtime y construye la malla.
 /// Soporta buffers embebidos en base64 y texturas desde archivos .png de la carpeta.
 /// Las coordenadas del modelo ya vienen en bloques (1 unidad = 1 bloque de Minecraft).
+///
+/// Parámetros opcionales:
+///   flipV          — invierte la coordenada V de las UVs (glTF origen arriba-izq, Unity abajo-izq).
+///                    Activarlo en avatares; dejarlo en false para la mesa (MinecraftTable).
+///   buildHierarchy — reconstruye el árbol de nodos del glTF en GameObjects emparentados.
+///                    Activarlo en avatares para que Hat/Jacket sigan a la cabeza/brazos.
 /// </summary>
 public static class GltfModelLoader
 {
     static readonly string[] VecComponentNames = { "x", "y", "z", "w" };
 
-    public static GameObject Load(string gltfPath, string textureFolder, string objectName = "GltfModel")
+    public static GameObject Load(string gltfPath, string textureFolder, string objectName = "GltfModel",
+                                  bool flipV = false, bool buildHierarchy = false)
     {
         if (string.IsNullOrEmpty(gltfPath) || !File.Exists(gltfPath))
         {
@@ -132,54 +139,192 @@ public static class GltfModelLoader
         var go = new GameObject(objectName);
         var meshCache = new Dictionary<int, Mesh>(); // meshIndex -> Mesh
 
-        foreach (var n in nodes)
+        if (buildHierarchy)
         {
-            var nd = n as Dictionary<string, object>;
-            int meshIdx = GetInt(nd, "mesh");
-            if (meshIdx < 0) continue;
+            // Reconstruir el árbol completo de nodos del glTF.
+            // Primero creamos todos los GameObjects, luego los emparentamos según children[].
+            int nodeCount = nodes.Count;
+            var nodeObjects = new GameObject[nodeCount];
 
-            string nodeName = GetString(nd, "name");
-            if (string.IsNullOrEmpty(nodeName)) nodeName = "node";
-
-            var child = new GameObject(nodeName);
-            child.transform.SetParent(go.transform, false);
-
-            if (!meshCache.TryGetValue(meshIdx, out Mesh mesh))
+            for (int ni = 0; ni < nodeCount; ni++)
             {
-                mesh = BuildMesh(meshes[meshIdx] as Dictionary<string, object>, accessors, bufferViews, bufferData);
-                meshCache[meshIdx] = mesh;
-            }
+                var nd = nodes[ni] as Dictionary<string, object>;
+                string nodeName = GetString(nd, "name");
+                if (string.IsNullOrEmpty(nodeName)) nodeName = "node_" + ni;
 
-            if (mesh == null) continue;
+                var nodeGo = new GameObject(nodeName);
+                nodeObjects[ni] = nodeGo;
 
-            child.AddComponent<MeshFilter>().sharedMesh = mesh;
+                // Aplicar translation / rotation / scale del nodo si existen.
+                ApplyNodeTransform(nd, nodeGo.transform);
 
-            var renderer = child.AddComponent<MeshRenderer>();
-            var md = meshes[meshIdx] as Dictionary<string, object>;
-            var primitives = GetList(md, "primitives");
-            var mats = new List<Material>();
-            if (primitives != null)
-            {
-                foreach (var p in primitives)
+                // Adjuntar malla si el nodo tiene una.
+                int meshIdx = GetInt(nd, "mesh");
+                if (meshIdx >= 0 && meshIdx < meshes.Count)
                 {
-                    var pd = p as Dictionary<string, object>;
-                    int matIdx = GetInt(pd, "material");
-                    Material m = (matIdx >= 0 && matIdx < textureMaterials.Count) ? textureMaterials[matIdx] : null;
-                    mats.Add(m ?? new Material(Shader.Find("Standard")));
+                    if (!meshCache.TryGetValue(meshIdx, out Mesh mesh))
+                    {
+                        mesh = BuildMesh(meshes[meshIdx] as Dictionary<string, object>,
+                                         accessors, bufferViews, bufferData, flipV);
+                        meshCache[meshIdx] = mesh;
+                    }
+
+                    if (mesh != null)
+                    {
+                        nodeGo.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+                        var renderer = nodeGo.AddComponent<MeshRenderer>();
+                        var md = meshes[meshIdx] as Dictionary<string, object>;
+                        var primitives = GetList(md, "primitives");
+                        var mats = new List<Material>();
+                        if (primitives != null)
+                        {
+                            foreach (var p in primitives)
+                            {
+                                var pd = p as Dictionary<string, object>;
+                                int matIdx = GetInt(pd, "material");
+                                Material m = (matIdx >= 0 && matIdx < textureMaterials.Count) ? textureMaterials[matIdx] : null;
+                                mats.Add(m ?? new Material(Shader.Find("Standard")));
+                            }
+                        }
+                        renderer.sharedMaterials = mats.ToArray();
+                        renderer.shadowCastingMode = ShadowCastingMode.Off;
+                        renderer.receiveShadows = false;
+                    }
                 }
             }
-            renderer.sharedMaterials = mats.ToArray();
-            renderer.shadowCastingMode = ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
+
+            // Segunda pasada: emparentar según children[] del glTF.
+            // Los nodos sin padre se cuelgan del objeto raíz go.
+            bool[] hasParent = new bool[nodeCount];
+            for (int ni = 0; ni < nodeCount; ni++)
+            {
+                var nd = nodes[ni] as Dictionary<string, object>;
+                var children = GetList(nd, "children");
+                if (children == null) continue;
+                foreach (var c in children)
+                {
+                    int childIdx = -1;
+                    if (c is double d) childIdx = (int)d;
+                    else if (c is int i) childIdx = i;
+                    else if (c is long l) childIdx = (int)l;
+                    else { try { childIdx = Convert.ToInt32(c, CultureInfo.InvariantCulture); } catch { } }
+
+                    if (childIdx >= 0 && childIdx < nodeCount)
+                    {
+                        nodeObjects[childIdx].transform.SetParent(nodeObjects[ni].transform, false);
+                        hasParent[childIdx] = true;
+                    }
+                }
+            }
+
+            // Colgar los nodos raíz (sin padre) del objeto go.
+            for (int ni = 0; ni < nodeCount; ni++)
+            {
+                if (!hasParent[ni])
+                    nodeObjects[ni].transform.SetParent(go.transform, false);
+            }
+        }
+        else
+        {
+            // Comportamiento plano original: solo nodos con malla, todos hijos de go.
+            foreach (var n in nodes)
+            {
+                var nd = n as Dictionary<string, object>;
+                int meshIdx = GetInt(nd, "mesh");
+                if (meshIdx < 0) continue;
+
+                string nodeName = GetString(nd, "name");
+                if (string.IsNullOrEmpty(nodeName)) nodeName = "node";
+
+                var child = new GameObject(nodeName);
+                child.transform.SetParent(go.transform, false);
+
+                if (!meshCache.TryGetValue(meshIdx, out Mesh mesh))
+                {
+                    mesh = BuildMesh(meshes[meshIdx] as Dictionary<string, object>,
+                                     accessors, bufferViews, bufferData, flipV);
+                    meshCache[meshIdx] = mesh;
+                }
+
+                if (mesh == null) continue;
+
+                child.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+                var renderer = child.AddComponent<MeshRenderer>();
+                var md = meshes[meshIdx] as Dictionary<string, object>;
+                var primitives = GetList(md, "primitives");
+                var mats = new List<Material>();
+                if (primitives != null)
+                {
+                    foreach (var p in primitives)
+                    {
+                        var pd = p as Dictionary<string, object>;
+                        int matIdx = GetInt(pd, "material");
+                        Material m = (matIdx >= 0 && matIdx < textureMaterials.Count) ? textureMaterials[matIdx] : null;
+                        mats.Add(m ?? new Material(Shader.Find("Standard")));
+                    }
+                }
+                renderer.sharedMaterials = mats.ToArray();
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+            }
         }
 
         return go;
     }
 
+    // ── Aplicar transformación de nodo glTF ──────────────────────────────────
+
+    static void ApplyNodeTransform(Dictionary<string, object> nd, Transform t)
+    {
+        // translation
+        var transList = GetList(nd, "translation");
+        if (transList != null && transList.Count >= 3)
+        {
+            float tx = ToFloat(transList[0]);
+            float ty = ToFloat(transList[1]);
+            float tz = ToFloat(transList[2]);
+            t.localPosition = new Vector3(tx, ty, tz);
+        }
+
+        // rotation (quaternion XYZW en glTF)
+        var rotList = GetList(nd, "rotation");
+        if (rotList != null && rotList.Count >= 4)
+        {
+            float rx = ToFloat(rotList[0]);
+            float ry = ToFloat(rotList[1]);
+            float rz = ToFloat(rotList[2]);
+            float rw = ToFloat(rotList[3]);
+            t.localRotation = new Quaternion(rx, ry, rz, rw);
+        }
+
+        // scale
+        var scaleList = GetList(nd, "scale");
+        if (scaleList != null && scaleList.Count >= 3)
+        {
+            float sx = ToFloat(scaleList[0]);
+            float sy = ToFloat(scaleList[1]);
+            float sz = ToFloat(scaleList[2]);
+            t.localScale = new Vector3(sx, sy, sz);
+        }
+    }
+
+    static float ToFloat(object o)
+    {
+        if (o is double d) return (float)d;
+        if (o is float f) return f;
+        if (o is int i) return i;
+        try { return Convert.ToSingle(o, CultureInfo.InvariantCulture); } catch { return 0f; }
+    }
+
+    // ── Construcción de malla ────────────────────────────────────────────────
+
     static Mesh BuildMesh(Dictionary<string, object> meshDef,
                           List<object> accessors,
                           List<object> bufferViews,
-                          List<byte[]> bufferData)
+                          List<byte[]> bufferData,
+                          bool flipV)
     {
         var primitives = GetList(meshDef, "primitives");
         if (primitives == null || primitives.Count == 0) return null;
@@ -203,7 +348,7 @@ public static class GltfModelLoader
 
             var pos = ReadAccessor(accessors, bufferViews, bufferData, posAcc);
             var nor = norAcc >= 0 ? ReadAccessor(accessors, bufferViews, bufferData, norAcc) : null;
-            var uv = uvAcc >= 0 ? ReadAccessorUV(accessors, bufferViews, bufferData, uvAcc) : null;
+            var uv = uvAcc >= 0 ? ReadAccessorUV(accessors, bufferViews, bufferData, uvAcc, flipV) : null;
             var idx = ReadAccessorIndices(accessors, bufferViews, bufferData, idxAcc);
 
             if (pos == null || idx == null) continue;
@@ -270,7 +415,11 @@ public static class GltfModelLoader
         return result;
     }
 
-    static List<Vector2> ReadAccessorUV(List<object> accessors, List<object> bufferViews, List<byte[]> bufferData, int accIdx)
+    /// <summary>
+    /// Lee coordenadas UV. Si flipV es true, invierte la coordenada V para compatibilizar
+    /// el sistema glTF (origen arriba-izquierda) con Unity (origen abajo-izquierda).
+    /// </summary>
+    static List<Vector2> ReadAccessorUV(List<object> accessors, List<object> bufferViews, List<byte[]> bufferData, int accIdx, bool flipV)
     {
         var ad = accessors[accIdx] as Dictionary<string, object>;
         int bvIdx = GetInt(ad, "bufferView");
@@ -295,7 +444,8 @@ public static class GltfModelLoader
             int off = start + i * stride;
             float x = ReadComponent(buf, off, componentType);
             float y = ReadComponent(buf, off + compSize, componentType);
-            result.Add(new Vector2(x, y));
+            // glTF: V=0 es borde SUPERIOR. Unity: V=0 es borde INFERIOR. Invertir si flipV=true.
+            result.Add(new Vector2(x, flipV ? 1f - y : y));
         }
         return result;
     }
