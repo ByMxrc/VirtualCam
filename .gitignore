@@ -1,0 +1,70 @@
+# Carpetas generadas por Unity (no se versionan)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Assets generados automáticamente
+/[Aa]ssets/Plugins/Editor/JetBrains*
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Caché de Addressables / Asset Store
+/[Aa]ssets/AddressableAssetsData/*/*.bin*
+/[Aa]ssets/[Ss]treamingAssets/*.meta
+
+# IDEs y editores
+.vs/
+.vscode/
+.idea/
+.gradle/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Archivos de Visual Studio / Rider
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+.utmp/
+/[Ll]ocalPackages/
+.collabignore
+
+# Crashlytics / reportes de errores
+sysinfo.txt
+crashlytics-build.properties
+
+# Builds
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# Dependencias del sistema
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Archivos de código generado por Unity
+/[Aa]ssets/Plugins/Android/*.tmp
+
+# Otros
+ExportedObj/
+.consulo/
+*.stackdump
