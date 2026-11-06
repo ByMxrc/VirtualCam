@@ -49,6 +49,7 @@ namespace VTuberCam
     private Vector2 cameraListScroll;
     private VtuberAvatarPreview avatarPreview;
     private Light[] sunlight;
+    private Light avatarFill;
     private readonly Dictionary<Material, Shader> litShaders = new Dictionary<Material, Shader>();
     private int cameraIndex, resolutionIndex = 2, fpsIndex = 1;
     private readonly int[] widths = { 640, 960, 1280, 1920 };
@@ -103,17 +104,29 @@ namespace VTuberCam
       HideTrackingGraphicsFromGame();
       sunlight = FindObjectsByType<Light>(FindObjectsSortMode.None);
       ApplyNaturalLighting();
-      RenderSettings.ambientMode = AmbientMode.Flat;
-      RenderSettings.ambientLight = new Color(.53f, .53f, .53f);
     }
 
     private void ApplyNaturalLighting()
     {
+      RenderSettings.ambientMode = AmbientMode.Flat;
+      RenderSettings.ambientLight = new Color(.74f, .74f, .74f);
+      if (!avatarFill && sceneCamera)
+      {
+        var fillObject = new GameObject("VTuber front fill light");
+        fillObject.transform.SetParent(sceneCamera.transform, false);
+        fillObject.transform.localRotation = Quaternion.Euler(30f, -25f, 0f);
+        avatarFill = fillObject.AddComponent<Light>();
+        avatarFill.type = LightType.Directional;
+        avatarFill.shadows = LightShadows.None;
+        avatarFill.color = Color.white;
+        avatarFill.intensity = .7f;
+      }
+      if (avatarFill) avatarFill.enabled = naturalLighting;
       if (sunlight != null) foreach (var light in sunlight)
       {
         if (!light || light.type != LightType.Directional) continue;
         light.enabled = naturalLighting;
-        light.intensity = .45f;
+        light.intensity = .55f;
         light.color = Color.white;
       }
 
@@ -472,9 +485,9 @@ namespace VTuberCam
             avatars.AutomaticBlink = !avatars.AutomaticBlink;
         }
       }
-      Box(new Rect(24,607,595,91),new Color(.10f,.12f,.17f,.58f));
-      GUI.Label(new Rect(40,612,565,78),
-        "CONTROLES\nClic izquierdo + arrastrar: girar cámara   ·   Clic derecho + arrastrar: mover\nRueda del mouse: zoom   ·   Reiniciar posición: calibrar pose",legend);
+      Box(new Rect(8,579,322,125),new Color(.10f,.12f,.17f,.58f));
+      GUI.Label(new Rect(19,584,300,112),
+        "CONTROLES\n• Girar: clic izquierdo + arrastrar\n• Mover: clic derecho + arrastrar\n• Zoom: rueda del mouse\n• Calibrar: Reiniciar posición",legend);
     }
 
     private void DrawSkinWindow(int id)

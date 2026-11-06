@@ -12,6 +12,8 @@ namespace VTuberCam
     [SerializeField, Range(0.05f, 1.5f)] private float depthScale = 0.6f;
     [SerializeField, Range(1f, 24f)] private float smoothing = 10f;
     [SerializeField, Range(0f, 10f)] private float deadzoneDegrees = 2f;
+    private const float FaceDeadzonePercent = 1f;
+    private const float RollNeutralDegrees = 2f;
     [SerializeField] private float lostTimeout = 1.2f;
     [SerializeField] private float returnToRestSpeed = 3f;
 
@@ -40,6 +42,11 @@ namespace VTuberCam
     private float neutralHeadRoll;
     private Vector3 faceAngles;
     private Vector3 neutralFaceAngles;
+    private Vector3 stableFaceOffset;
+    private readonly float[] recentRoll = new float[5];
+    private readonly float[] sortedRoll = new float[5];
+    private int rollSampleCount, rollSampleIndex;
+    private bool faceOffsetInitialized;
     private bool faceNeutralValid;
     private float lastFaceTime = -999f;
     private bool externalFace;
@@ -56,6 +63,9 @@ namespace VTuberCam
       lastFaceTime = Time.time;
       externalFace = true;
       if (!faceNeutralValid) { neutralFaceAngles = angles; faceNeutralValid = true; }
+      recentRoll[rollSampleIndex] = Mathf.Clamp(Mathf.DeltaAngle(neutralFaceAngles.z, angles.z), -45f, 45f);
+      rollSampleIndex = (rollSampleIndex + 1) % recentRoll.Length;
+      rollSampleCount = Mathf.Min(rollSampleCount + 1, recentRoll.Length);
     }
 
     public VtuberPoseFrame GetPoseSnapshot()
@@ -108,6 +118,9 @@ namespace VTuberCam
       neutralArmValid[0] = false;
       neutralArmValid[1] = false;
       faceNeutralValid = false;
+      faceOffsetInitialized = false;
+      rollSampleCount = 0;
+      rollSampleIndex = 0;
     }
 
     public void ResetPose()
@@ -280,10 +293,35 @@ namespace VTuberCam
 
     private Quaternion FaceTarget()
     {
-      return Quaternion.Euler(
+      var offset = new Vector3(
         Mathf.Clamp(-Mathf.DeltaAngle(neutralFaceAngles.x, faceAngles.x), -60f, 55f),
         Mathf.Clamp(Mathf.DeltaAngle(neutralFaceAngles.y, faceAngles.y), -65f, 65f),
-        Mathf.Clamp(Mathf.DeltaAngle(neutralFaceAngles.z, faceAngles.z), -45f, 45f)) * restHead;
+        FilteredRoll());
+      if (!faceOffsetInitialized)
+      {
+        stableFaceOffset = offset;
+        faceOffsetInitialized = true;
+      }
+      else
+      {
+        // Compare with the last accepted pose so jitter is ignored at any head angle.
+        var fraction = FaceDeadzonePercent * .01f;
+        if (Mathf.Abs(offset.x - stableFaceOffset.x) > 115f * fraction) stableFaceOffset.x = offset.x;
+        if (Mathf.Abs(offset.y - stableFaceOffset.y) > 130f * fraction) stableFaceOffset.y = offset.y;
+        if (Mathf.Abs(offset.z - stableFaceOffset.z) > 90f * fraction) stableFaceOffset.z = offset.z;
+      }
+      return Quaternion.Euler(stableFaceOffset) * restHead;
+    }
+
+    private float FilteredRoll()
+    {
+      if (rollSampleCount == 0) return 0f;
+      Array.Copy(recentRoll, sortedRoll, rollSampleCount);
+      Array.Sort(sortedRoll, 0, rollSampleCount);
+      var median = sortedRoll[rollSampleCount / 2];
+      if (rollSampleCount % 2 == 0)
+        median = (sortedRoll[rollSampleCount / 2 - 1] + median) * .5f;
+      return Mathf.Abs(median) < RollNeutralDegrees ? 0f : median;
     }
 
     private float FaceResponse(Quaternion target)
